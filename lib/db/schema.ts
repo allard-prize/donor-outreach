@@ -1,8 +1,10 @@
 import {
   boolean,
+  date,
   index,
   integer,
   jsonb,
+  numeric,
   pgEnum,
   pgTable,
   primaryKey,
@@ -104,6 +106,53 @@ export const cronRunStatus = pgEnum("cron_run_status", [
   "partial",
 ]);
 
+export const relationshipStage = pgEnum("relationship_stage", [
+  "no_relationship",
+  "early",
+  "warm",
+  "active",
+  "stalled",
+  "dormant",
+]);
+
+export const responsiveness = pgEnum("responsiveness", [
+  "high",
+  "moderate",
+  "low",
+  "none",
+]);
+
+export const momentum = pgEnum("momentum", [
+  "increasing",
+  "stable",
+  "declining",
+]);
+
+export const touchpointType = pgEnum("touchpoint_type", [
+  "congratulations",
+  "collaboration",
+  "content_sharing",
+  "introduction",
+  "meeting_request",
+  "invitation",
+  "intermediary_engagement",
+  "follow_up",
+  "no_action",
+]);
+
+export const touchpointReviewStatus = pgEnum("touchpoint_review_status", [
+  "pending",
+  "approved",
+  "rejected",
+  "promoted",
+]);
+
+export const briefingStatus = pgEnum("briefing_status", [
+  "sent",
+  "failed",
+  "partial",
+]);
+
 // ---------- Domain tables ----------
 
 export const prospects = pgTable(
@@ -184,5 +233,113 @@ export const cronRuns = pgTable(
   (t) => ({
     jobNameIdx: index("cron_run_job_name_idx").on(t.jobName),
     startedAtIdx: index("cron_run_started_at_idx").on(t.startedAt),
+  })
+);
+
+export const touchpointsAssigned = pgTable(
+  "touchpoint_assigned",
+  {
+    id: text("id").primaryKey().$defaultFn(createId),
+    prospectId: text("prospect_id")
+      .notNull()
+      .references(() => prospects.id, { onDelete: "cascade" }),
+    touchpointType: touchpointType("touchpoint_type").notNull(),
+    completedDate: date("completed_date", { mode: "string" }).notNull(),
+    summary: text("summary").notNull().default(""),
+    response: text("response"),
+    nextStep: text("next_step"),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+  },
+  (t) => ({
+    prospectIdx: index("touchpoint_assigned_prospect_idx").on(t.prospectId),
+    completedDateIdx: index("touchpoint_assigned_completed_date_idx").on(t.completedDate),
+  })
+);
+
+// ---------- Phase 2C: decision-path tables ----------
+
+export const briefings = pgTable(
+  "briefing",
+  {
+    id: text("id").primaryKey().$defaultFn(createId),
+    cronRunId: text("cron_run_id").references(() => cronRuns.id, {
+      onDelete: "set null",
+    }),
+    sentAt: timestamp("sent_at", { mode: "date" }).notNull().defaultNow(),
+    recipients: jsonb("recipients").$type<string[]>().notNull(),
+    prospectCount: integer("prospect_count").notNull().default(0),
+    alertCount: integer("alert_count").notNull().default(0),
+    htmlBody: text("html_body").notNull().default(""),
+    subject: text("subject").notNull().default(""),
+    llmCostUsd: numeric("llm_cost_usd", { precision: 10, scale: 4 })
+      .notNull()
+      .default("0"),
+    llmCallCount: integer("llm_call_count").notNull().default(0),
+    status: briefingStatus("status").notNull().default("sent"),
+    errorMessage: text("error_message"),
+  },
+  (t) => ({
+    sentAtIdx: index("briefing_sent_at_idx").on(t.sentAt),
+    statusIdx: index("briefing_status_idx").on(t.status),
+  })
+);
+
+export const monitoringResults = pgTable(
+  "monitoring_result",
+  {
+    id: text("id").primaryKey(), // `${prospectId}_${runDateIso}` per spec
+    prospectId: text("prospect_id")
+      .notNull()
+      .references(() => prospects.id, { onDelete: "cascade" }),
+    runDate: date("run_date", { mode: "string" }).notNull(),
+    stage: relationshipStage("stage").notNull(),
+    responsiveness: responsiveness("responsiveness").notNull(),
+    momentum: momentum("momentum").notNull(),
+    interpretation: text("interpretation").notNull().default(""),
+    summary: text("summary").notNull().default(""),
+    keyAlerts: jsonb("key_alerts").$type<unknown[]>().notNull().default([]),
+    briefingId: text("briefing_id").references(() => briefings.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+  },
+  (t) => ({
+    prospectIdx: index("monitoring_result_prospect_idx").on(t.prospectId),
+    runDateIdx: index("monitoring_result_run_date_idx").on(t.runDate),
+  })
+);
+
+export const touchpointsPotential = pgTable(
+  "touchpoint_potential",
+  {
+    id: text("id").primaryKey(), // `${prospectId}_${runDateIso}` per spec
+    prospectId: text("prospect_id")
+      .notNull()
+      .references(() => prospects.id, { onDelete: "cascade" }),
+    runDate: date("run_date", { mode: "string" }).notNull(),
+    touchpointType: touchpointType("touchpoint_type").notNull(),
+    priorityScore: integer("priority_score").notNull(),
+    engagementRationale: text("engagement_rationale").notNull().default(""),
+    draftContent: text("draft_content").notNull().default(""),
+    reviewStatus: touchpointReviewStatus("review_status")
+      .notNull()
+      .default("pending"),
+    reviewedBy: text("reviewed_by"),
+    reviewedAt: timestamp("reviewed_at", { mode: "date" }),
+    promotedToAssignedId: text("promoted_to_assigned_id"),
+    briefingId: text("briefing_id").references(() => briefings.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+  },
+  (t) => ({
+    prospectIdx: index("touchpoint_potential_prospect_idx").on(t.prospectId),
+    runDateIdx: index("touchpoint_potential_run_date_idx").on(t.runDate),
+    reviewStatusIdx: index("touchpoint_potential_review_status_idx").on(
+      t.reviewStatus
+    ),
+    priorityScoreIdx: index("touchpoint_potential_priority_score_idx").on(
+      t.priorityScore
+    ),
   })
 );

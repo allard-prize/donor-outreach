@@ -18,7 +18,7 @@ The repo is owned by `allard-prize-alerts` on GitHub and may be public at any ti
 **Phase 1 reference**: `~/gdrive-brianpkm/3-Resources/allard-prize-donor-outreach-spec.md` (reverse-engineered from n8n JSON at `~/workspace/workflows/allard-prize/ap-donor-outreach/`)
 **Project tracker**: `~/gdrive-brianpkm/1-Projects/Allard Prize Donor Outreach System.md`
 
-**Status**: Phase 2B capture path complete (RSS + Gmail + LinkedIn). Next: Phase 2C decision path (agent + briefing send).
+**Status**: Phase 2C decision path code-complete (agent, dossier loader, briefing send, donor-outreach cron handler). Awaiting fixture-based smoke + 2F data migration before live cron arm.
 
 ---
 
@@ -65,7 +65,8 @@ app/
       rss/route.ts             # daily 06:00 UTC — port of update-rss-results.json (Phase 2B)
       email-capture/route.ts   # daily 06:30 UTC — port of capture-ap-emails.json (Phase 2B)
       linkedin-scrape/route.ts # Mondays 23:00 UTC — port of capture-linkedin-posts.json (Phase 2B)
-      # donor-outreach/, health-check/ — Phase 2C
+      donor-outreach/route.ts  # Tuesdays 09:00 UTC — port of ap-donor-outreach.json (Phase 2C)
+      # health-check/ — TBD (Phase 2C/2D)
 lib/
   db/
     index.ts           # Drizzle + Neon HTTP client
@@ -77,9 +78,20 @@ lib/
     rss.ts             # RSS parser → result table (Phase 2B done)
     gmail.ts           # Gmail label-based capture → result table (Phase 2B done)
     linkedin.ts        # Apify-driven LinkedIn post scrape → result table (Phase 2B done)
-  llm/                 # agent.ts + judge.ts (Phase 2C, 2E)
-  email/               # send-briefing.ts (Phase 2C)
-  dossiers/            # google-docs.ts (2C) + onedrive.ts (2G)
+  llm/
+    agent.ts                 # OpenRouter call + Zod-validated agent output (2C)
+    aggregate.ts             # pending-results → per-prospect payload (Clean Results port)
+    donor-outreach.ts        # orchestrator used by the cron handler
+    prompts.ts               # loads prompts/agent-{system,user}-v1.md
+    schema.ts                # agent output Zod schema + invariants
+    judge.ts                 # eval-harness judge (Phase 2E)
+  email/
+    render-briefing.ts       # per-prospect HTML — preserves Phase 1 layout byte-for-byte
+    send-briefing.ts         # Gmail send + briefings row insert (2C)
+  dossiers/
+    index.ts                 # dossierProvider dispatcher
+    google-docs.ts           # Docs API read (2C; dead code after 2G cleanup)
+    onedrive.ts              # OneDrive read via MS Graph (Phase 2G)
 drizzle/
   migrations/          # drizzle-kit-generated SQL migrations
 auth.ts                # Auth.js v5 config
@@ -97,6 +109,25 @@ scripts/
 - `runtime = "nodejs"` + `dynamic = "force-dynamic"` per handler.
 - Handlers return JSON with `{ ok, durationMs, cronRunId, ...summary }` and 500 on caught errors.
 - Every handler MUST call `recordRunStart(jobName)` immediately after auth check and `recordRunFinish(runId, outcome, opts)` in both success and catch paths. `lib/cron-runs/recorder.ts` provides both helpers. Outcome is `success` for clean runs, `partial` when the summary indicates per-item failures or timeouts, `failure` when the handler caught an exception.
+
+## Donor-outreach decision path invariants (Phase 2C)
+
+- Agent prompts live in `prompts/agent-system-v1.md` + `prompts/agent-user-v1.md` — ported verbatim from the Phase 1 n8n workflow. Template tokens: `{{RESULTS_JSON}}`, `{{CONTEXT}}`, `{{TOUCHPOINTS_JSON}}`, `{{FULL_NAME}}`. Substitution lives in `lib/llm/prompts.ts#renderUserPrompt`.
+- Agent output is parsed + Zod-validated against `lib/llm/schema.ts`. Validation enforces the Phase 1 invariants: `priority_score ≤ 7 ⇒ touchpoint_type = no_action`, `no_action ⇒ draft_content = "No outreach recommended at this time."`, `priority_score ≥ 8 ⇒ draft_content ≥ 40 chars`, and the literal `Why now:` prefix on `engagement_rationale` when `touchpoint_type ≠ no_action`.
+- One agent call per prospect with at least one `pending` result. `priority_score ≥ 8` (configurable via `runDonorOutreach({ alertThreshold })`) triggers a per-prospect briefing email; `< 8` records only `monitoring_results` + (when applicable) `touchpoints_potential`. A weekly run with zero alerts records a sentinel `briefings` row with `alertCount = 0` so absence of a Tuesday row signals a broken cron.
+- `lib/email/render-briefing.ts` preserves the Phase 1 HTML layout (header, monitoring summary, key alerts table, last-5 touchpoints table, recommendation, draft, generated-at footer) — keep parity tight so Preet's reading habits transfer.
+- All Phase 2C writes are idempotent: `monitoring_results.id` and `touchpoints_potential.id` are `${prospectId}_${runDate}` so a re-run of the same Tuesday overwrites in place. `results.processedStatus` flips to `processed` after a successful per-prospect persist; re-runs naturally pull zero pending and exit clean.
+- Cost log: per-call OpenRouter cost reported in `briefings.llmCostUsd` (sum per briefing row) and surfaced in the `donor_outreach` `cron_runs.metadata.llmCostUsd`.
+
+## Fixture smoke test
+
+`scripts/smoke-donor-outreach.ts` seeds a synthetic prospect + two pending results, runs `runDonorOutreach` with a stubbed agent (no OpenRouter spend) and stubbed dossier (no Docs read), asserts persistence, then tears the fixture down. Briefings/cron_runs rows are intentionally left for observability.
+
+```bash
+pnpm tsx --env-file=.env.local scripts/smoke-donor-outreach.ts
+```
+
+Exits non-zero on any assertion miss. Safe against `.env.local` (Neon prod) because all fixture row ids are prefixed `smoke_phase2c_<timestamp>` and deleted in teardown.
 
 ## Gmail capture invariants
 

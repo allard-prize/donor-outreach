@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { captureLinkedIn } from "@/lib/sources/linkedin";
+import { recordRunStart, recordRunFinish } from "@/lib/cron-runs/recorder";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -11,19 +12,32 @@ export async function GET(request: Request) {
   }
 
   const startedAt = Date.now();
+  const run = await recordRunStart("linkedin_scrape");
   try {
     const summary = await captureLinkedIn();
+    const outcome =
+      summary.prospectsFailed.length > 0 || summary.prospectsTimedOut > 0
+        ? "partial"
+        : "success";
+    await recordRunFinish(run.id, outcome, {
+      itemsProcessed: summary.postsInserted,
+      metadata: { ...summary },
+    });
     return NextResponse.json({
       ok: true,
       durationMs: Date.now() - startedAt,
+      cronRunId: run.id,
       ...summary,
     });
   } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    await recordRunFinish(run.id, "failure", { errorMessage: message });
     return NextResponse.json(
       {
         ok: false,
         durationMs: Date.now() - startedAt,
-        error: err instanceof Error ? err.message : String(err),
+        cronRunId: run.id,
+        error: message,
       },
       { status: 500 }
     );

@@ -2,6 +2,7 @@ import {
   boolean,
   index,
   integer,
+  jsonb,
   pgEnum,
   pgTable,
   primaryKey,
@@ -88,6 +89,21 @@ export const processedStatus = pgEnum("processed_status", [
   "processed",
 ]);
 
+export const cronJobName = pgEnum("cron_job_name", [
+  "rss",
+  "email_capture",
+  "linkedin_scrape",
+  "donor_outreach",
+  "health_check",
+]);
+
+export const cronRunStatus = pgEnum("cron_run_status", [
+  "running",
+  "success",
+  "failure",
+  "partial",
+]);
+
 // ---------- Domain tables ----------
 
 export const prospects = pgTable(
@@ -150,5 +166,23 @@ export const results = pgTable(
     sourceTypeIdx: index("result_source_type_idx").on(t.sourceType),
     processedStatusIdx: index("result_processed_status_idx").on(t.processedStatus),
     pubDateIdx: index("result_pub_date_idx").on(t.pubDate),
+  })
+);
+
+export const cronRuns = pgTable(
+  "cron_run",
+  {
+    id: text("id").primaryKey().$defaultFn(createId),
+    jobName: cronJobName("job_name").notNull(),
+    startedAt: timestamp("started_at", { mode: "date" }).notNull().defaultNow(),
+    completedAt: timestamp("completed_at", { mode: "date" }),
+    status: cronRunStatus("status").notNull().default("running"),
+    itemsProcessed: integer("items_processed").notNull().default(0),
+    errorMessage: text("error_message"),
+    metadata: jsonb("metadata").$type<Record<string, unknown>>(),
+  },
+  (t) => ({
+    jobNameIdx: index("cron_run_job_name_idx").on(t.jobName),
+    startedAtIdx: index("cron_run_started_at_idx").on(t.startedAt),
   })
 );

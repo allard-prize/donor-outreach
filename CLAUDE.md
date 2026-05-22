@@ -62,16 +62,20 @@ app/
   api/
     auth/[...nextauth]/route.ts
     cron/
-      rss/route.ts     # daily — port of update-rss-results.json (Phase 2B)
-      # email-capture/, linkedin-scrape/, donor-outreach/, health-check/ — Phase 2B/2C
+      rss/route.ts             # daily 06:00 UTC — port of update-rss-results.json (Phase 2B)
+      email-capture/route.ts   # daily 06:30 UTC — port of capture-ap-emails.json (Phase 2B)
+      # linkedin-scrape/, donor-outreach/, health-check/ — Phase 2B/2C
 lib/
   db/
     index.ts           # Drizzle + Neon HTTP client
     schema.ts          # table + enum definitions
     id.ts              # cuid2 generator
+  gmail/
+    client.ts          # Gmail API OAuth2 client (read + label-modify)
   sources/
     rss.ts             # RSS parser → result table (Phase 2B done)
-    # gmail.ts, linkedin.ts — Phase 2B
+    gmail.ts           # Gmail label-based capture → result table (Phase 2B done)
+    # linkedin.ts — Phase 2B
   llm/                 # agent.ts + judge.ts (Phase 2C, 2E)
   email/               # send-briefing.ts (Phase 2C)
   dossiers/            # google-docs.ts (2C) + onedrive.ts (2G)
@@ -91,6 +95,13 @@ scripts/
 - Vercel env-var changes do NOT trigger a redeploy — new env values only apply to NEW builds. After adding/rotating a cron-relevant env, push a commit (empty is fine) to force a rebuild.
 - `runtime = "nodejs"` + `dynamic = "force-dynamic"` per handler.
 - Handlers return JSON with `{ ok, durationMs, ...summary }` and 500 on caught errors.
+
+## Gmail capture invariants
+
+- Prospect-to-label mapping is by `prospects.fullName` (case-insensitive). The agent's Gmail must have a label whose name exactly matches each `emailEnabled` prospect's full name.
+- Capture filter: messages currently in `INBOX` AND tagged with the prospect's label. The `INBOX` label is stripped after capture so the next day's run does not re-scan the same message. The donor label stays for historical reference.
+- Dedup is enforced in Postgres on `result.id` (Gmail message id). Re-adding `INBOX` to a stripped message will re-scan and the insert will no-op.
+- OAuth env (shared with the briefing-send path in Phase 2C): `GMAIL_OAUTH_CLIENT_ID`, `GMAIL_OAUTH_CLIENT_SECRET`, `GMAIL_OAUTH_REFRESH_TOKEN` — for `allard.prize.alerts@gmail.com`. Required scopes: `gmail.readonly` + `gmail.modify` for the read+label-removal path, `gmail.send` for Phase 2C briefing send.
 
 ---
 

@@ -81,7 +81,15 @@ export async function captureLinkedIn(): Promise<LinkedInCaptureSummary> {
 
   const token = process.env.APIFY_API_TOKEN;
   if (!token) {
-    throw new Error("Missing APIFY_API_TOKEN env");
+    // Diagnostic: enumerate env keys matching APIFY/AUTH/CRON to verify the
+    // var is or isn't reaching the runtime. Values intentionally omitted —
+    // only key names are dumped.
+    const visibleKeys = Object.keys(process.env)
+      .filter((k) => /^(APIFY|AUTH_|CRON_|GMAIL_|DATABASE_|ADMIN_)/.test(k))
+      .sort();
+    throw new Error(
+      `Missing APIFY_API_TOKEN env. process.env keys matching expected prefixes: [${visibleKeys.join(", ")}]`
+    );
   }
 
   const eligible = await loadEligibleProspects();

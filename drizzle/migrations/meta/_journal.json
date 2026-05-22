@@ -8,6 +8,13 @@
       "when": 1779405205222,
       "tag": "0000_thin_omega_flight",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1779410752944,
+      "tag": "0001_good_stranger",
+      "breakpoints": true
     }
   ]
 }

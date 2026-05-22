@@ -8,7 +8,7 @@ export default async function AdminHomePage() {
   const [{ value: prospectCount }] = await db
     .select({ value: count() })
     .from(prospects)
-    .where(isNull(prospects.deletedAt));
+    .where(isNull(prospects.archivedAt));
 
   return (
     <main className="mx-auto max-w-2xl p-8">

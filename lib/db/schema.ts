@@ -62,13 +62,33 @@ export const verificationTokens = pgTable(
   })
 );
 
-// ---------- Domain tables ----------
-// Phase 2A includes only `prospects` to prove the schema + migration loop.
-// Phase 2B+ adds sources, results, touchpoints_assigned, monitoring_results,
-// touchpoints_potential, briefings, cron_runs, eval_cases, eval_runs.
+// ---------- Domain enums ----------
 
-export const profileType = pgEnum("profile_type", ["individual", "organization"]);
-export const dossierProvider = pgEnum("dossier_provider", ["google_docs", "onedrive"]);
+export const profileType = pgEnum("profile_type", [
+  "institutional_funder",
+  "individual_donor",
+  "connector",
+  "credibility_node",
+  "collaborator",
+]);
+
+export const dossierProvider = pgEnum("dossier_provider", [
+  "google_docs",
+  "onedrive",
+]);
+
+export const sourceType = pgEnum("source_type", [
+  "rss",
+  "email",
+  "linkedin_post",
+]);
+
+export const processedStatus = pgEnum("processed_status", [
+  "pending",
+  "processed",
+]);
+
+// ---------- Domain tables ----------
 
 export const prospects = pgTable(
   "prospect",
@@ -77,15 +97,58 @@ export const prospects = pgTable(
     fullName: text("full_name").notNull(),
     profileType: profileType("profile_type").notNull(),
     linkedInUrl: text("linkedin_url"),
+    emailEnabled: boolean("email_enabled").notNull().default(false),
     linkedInEnabled: boolean("linkedin_enabled").notNull().default(false),
     dossierProvider: dossierProvider("dossier_provider"),
     dossierFileId: text("dossier_file_id"),
     createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { mode: "date" }).notNull().defaultNow(),
-    deletedAt: timestamp("deleted_at", { mode: "date" }),
+    archivedAt: timestamp("archived_at", { mode: "date" }),
   },
   (t) => ({
     profileTypeIdx: index("prospect_profile_type_idx").on(t.profileType),
-    deletedAtIdx: index("prospect_deleted_at_idx").on(t.deletedAt),
+    archivedAtIdx: index("prospect_archived_at_idx").on(t.archivedAt),
+  })
+);
+
+export const sources = pgTable(
+  "source",
+  {
+    id: text("id").primaryKey().$defaultFn(createId),
+    prospectId: text("prospect_id")
+      .notNull()
+      .references(() => prospects.id, { onDelete: "cascade" }),
+    rssUrl: text("rss_url").notNull(),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+    disabledAt: timestamp("disabled_at", { mode: "date" }),
+  },
+  (t) => ({
+    prospectIdx: index("source_prospect_idx").on(t.prospectId),
+    disabledAtIdx: index("source_disabled_at_idx").on(t.disabledAt),
+  })
+);
+
+export const results = pgTable(
+  "result",
+  {
+    id: text("id").primaryKey(), // resultId per spec — Gmail msg id for emails, generated for rss/linkedin
+    sourceId: text("source_id").references(() => sources.id, { onDelete: "set null" }),
+    prospectId: text("prospect_id")
+      .notNull()
+      .references(() => prospects.id, { onDelete: "cascade" }),
+    sourceType: sourceType("source_type").notNull(),
+    title: text("title").notNull(),
+    link: text("link"),
+    pubDate: timestamp("pub_date", { mode: "date" }).notNull(),
+    contentSnippet: text("content_snippet").notNull().default(""),
+    processedStatus: processedStatus("processed_status").notNull().default("pending"),
+    capturedAt: timestamp("captured_at", { mode: "date" }).notNull().defaultNow(),
+    processedAt: timestamp("processed_at", { mode: "date" }),
+  },
+  (t) => ({
+    prospectIdx: index("result_prospect_idx").on(t.prospectId),
+    sourceTypeIdx: index("result_source_type_idx").on(t.sourceType),
+    processedStatusIdx: index("result_processed_status_idx").on(t.processedStatus),
+    pubDateIdx: index("result_pub_date_idx").on(t.pubDate),
   })
 );

@@ -61,24 +61,36 @@ app/
   admin/               # auth-gated admin UI (Phase 2D)
   api/
     auth/[...nextauth]/route.ts
-    cron/              # Vercel Cron handlers (Phase 2B+)
+    cron/
+      rss/route.ts     # daily — port of update-rss-results.json (Phase 2B)
+      # email-capture/, linkedin-scrape/, donor-outreach/, health-check/ — Phase 2B/2C
 lib/
   db/
     index.ts           # Drizzle + Neon HTTP client
     schema.ts          # table + enum definitions
     id.ts              # cuid2 generator
+  sources/
+    rss.ts             # RSS parser → result table (Phase 2B done)
+    # gmail.ts, linkedin.ts — Phase 2B
   llm/                 # agent.ts + judge.ts (Phase 2C, 2E)
   email/               # send-briefing.ts (Phase 2C)
-  sources/             # rss.ts, gmail.ts, linkedin.ts (Phase 2B)
   dossiers/            # google-docs.ts (2C) + onedrive.ts (2G)
 drizzle/
   migrations/          # drizzle-kit-generated SQL migrations
 auth.ts                # Auth.js v5 config
-proxy.ts               # /admin allowlist gate (Next.js 16 replaces middleware.ts with proxy.ts)
+proxy.ts               # /admin allowlist gate (Next.js 16 replaces middleware.ts)
 drizzle.config.ts
+vercel.json            # framework=nextjs + cron schedules
 scripts/
   lint-destructive-migrations.mjs
 ```
+
+## Cron handler invariants
+
+- Auth: `Authorization: Bearer ${CRON_SECRET}` — required on every `/api/cron/*` request. Vercel Cron auto-attaches; manual hits need the env value.
+- Vercel env-var changes do NOT trigger a redeploy — new env values only apply to NEW builds. After adding/rotating a cron-relevant env, push a commit (empty is fine) to force a rebuild.
+- `runtime = "nodejs"` + `dynamic = "force-dynamic"` per handler.
+- Handlers return JSON with `{ ok, durationMs, ...summary }` and 500 on caught errors.
 
 ---
 

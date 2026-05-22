@@ -18,7 +18,7 @@ The repo is owned by `allard-prize-alerts` on GitHub and may be public at any ti
 **Phase 1 reference**: `~/gdrive-brianpkm/3-Resources/allard-prize-donor-outreach-spec.md` (reverse-engineered from n8n JSON at `~/workspace/workflows/allard-prize/ap-donor-outreach/`)
 **Project tracker**: `~/gdrive-brianpkm/1-Projects/Allard Prize Donor Outreach System.md`
 
-**Status**: Phase 2A scaffold in progress. Next: Phase 2B capture path.
+**Status**: Phase 2B capture path complete (RSS + Gmail + LinkedIn). Next: Phase 2C decision path (agent + briefing send).
 
 ---
 
@@ -64,7 +64,8 @@ app/
     cron/
       rss/route.ts             # daily 06:00 UTC — port of update-rss-results.json (Phase 2B)
       email-capture/route.ts   # daily 06:30 UTC — port of capture-ap-emails.json (Phase 2B)
-      # linkedin-scrape/, donor-outreach/, health-check/ — Phase 2B/2C
+      linkedin-scrape/route.ts # daily 07:00 UTC — port of capture-linkedin-posts.json (Phase 2B)
+      # donor-outreach/, health-check/ — Phase 2C
 lib/
   db/
     index.ts           # Drizzle + Neon HTTP client
@@ -75,7 +76,7 @@ lib/
   sources/
     rss.ts             # RSS parser → result table (Phase 2B done)
     gmail.ts           # Gmail label-based capture → result table (Phase 2B done)
-    # linkedin.ts — Phase 2B
+    linkedin.ts        # Apify-driven LinkedIn post scrape → result table (Phase 2B done)
   llm/                 # agent.ts + judge.ts (Phase 2C, 2E)
   email/               # send-briefing.ts (Phase 2C)
   dossiers/            # google-docs.ts (2C) + onedrive.ts (2G)
@@ -103,6 +104,14 @@ scripts/
 - Dedup is enforced in Postgres on `result.id` (Gmail message id). Re-adding `INBOX` to a stripped message will re-scan and the insert will no-op.
 - OAuth env (shared with the briefing-send path in Phase 2C): `GMAIL_OAUTH_CLIENT_ID`, `GMAIL_OAUTH_CLIENT_SECRET`, `GMAIL_OAUTH_REFRESH_TOKEN` — for `allard.prize.alerts@gmail.com`. Required scopes: `gmail.readonly` + `gmail.modify` for the read+label-removal path, `gmail.send` for Phase 2C briefing send.
 
+## LinkedIn capture invariants
+
+- Eligible prospects: `linkedInEnabled = true` AND `archivedAt IS NULL` AND `linkedInUrl IS NOT NULL`. URL is parsed by regex against `linkedin.com/in/<u>` (personal) or `linkedin.com/company/<u>` (company); unparseable URLs are silently skipped.
+- Apify actors (verbatim from Phase 1 n8n): personal posts `LQQIXN9Othf8f7R5n`, company posts `mrThmKLmkxJPehxCg`. Both called via `run-sync-get-dataset-items` so one HTTP call per prospect returns the dataset items.
+- Wall-time budget: total **50 s** shared across all prospects via a single deadline; per-call Apify `timeout` capped at 50 s. Any prospects whose runs would exceed the budget are counted as `prospectsTimedOut` and retried on the next day's cron — acceptable because LinkedIn posts have a 21-day freshness window.
+- Filter: only posts with `posted_at.date` within the last 21 days are inserted. Dedup is enforced in Postgres on `result.id` = Apify `full_urn`.
+- Env: `APIFY_API_TOKEN` (passed as `Authorization: Bearer …` on every Apify call).
+
 ---
 
-**Last Updated**: 2026-05-21
+**Last Updated**: 2026-05-22

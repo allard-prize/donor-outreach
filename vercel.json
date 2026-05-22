@@ -9,6 +9,10 @@
     {
       "path": "/api/cron/email-capture",
       "schedule": "30 6 * * *"
+    },
+    {
+      "path": "/api/cron/linkedin-scrape",
+      "schedule": "0 7 * * *"
     }
   ]
 }

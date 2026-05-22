@@ -64,7 +64,7 @@ app/
     cron/
       rss/route.ts             # daily 06:00 UTC — port of update-rss-results.json (Phase 2B)
       email-capture/route.ts   # daily 06:30 UTC — port of capture-ap-emails.json (Phase 2B)
-      linkedin-scrape/route.ts # daily 07:00 UTC — port of capture-linkedin-posts.json (Phase 2B)
+      linkedin-scrape/route.ts # Mondays 23:00 UTC — port of capture-linkedin-posts.json (Phase 2B)
       # donor-outreach/, health-check/ — Phase 2C
 lib/
   db/
@@ -95,7 +95,8 @@ scripts/
 - Auth: `Authorization: Bearer ${CRON_SECRET}` — required on every `/api/cron/*` request. Vercel Cron auto-attaches; manual hits need the env value.
 - Vercel env-var changes do NOT trigger a redeploy — new env values only apply to NEW builds. After adding/rotating a cron-relevant env, push a commit (empty is fine) to force a rebuild.
 - `runtime = "nodejs"` + `dynamic = "force-dynamic"` per handler.
-- Handlers return JSON with `{ ok, durationMs, ...summary }` and 500 on caught errors.
+- Handlers return JSON with `{ ok, durationMs, cronRunId, ...summary }` and 500 on caught errors.
+- Every handler MUST call `recordRunStart(jobName)` immediately after auth check and `recordRunFinish(runId, outcome, opts)` in both success and catch paths. `lib/cron-runs/recorder.ts` provides both helpers. Outcome is `success` for clean runs, `partial` when the summary indicates per-item failures or timeouts, `failure` when the handler caught an exception.
 
 ## Gmail capture invariants
 

@@ -68,6 +68,8 @@ const PROFILE_TYPE_MAP: Record<string, string> = {
 
 const SOURCE_TYPE_MAP: Record<string, string> = {
   rss: "rss",
+  google_alert: "rss", // Google Alerts are delivered as RSS feeds in Phase 1
+  google_alerts: "rss",
   email: "email",
   linkedin: "linkedin_post",
   linkedin_post: "linkedin_post",
@@ -75,17 +77,21 @@ const SOURCE_TYPE_MAP: Record<string, string> = {
   linkedin_posts: "linkedin_post",
 };
 
-const TOUCHPOINT_TYPES = new Set([
-  "congratulations",
-  "collaboration",
-  "content_sharing",
-  "introduction",
-  "meeting_request",
-  "invitation",
-  "intermediary_engagement",
-  "follow_up",
-  "no_action",
-]);
+// Historic touchpoint sheet uses a channel/shorthand vocab; map to the schema's
+// recommendation enum where clear, else "other" (refine later in admin UI).
+const TOUCHPOINT_TYPE_MAP: Record<string, string> = {
+  meeting: "meeting_request",
+  meeting_request: "meeting_request",
+  intro: "introduction",
+  introduction: "introduction",
+  congratulations: "congratulations",
+  collaboration: "collaboration",
+  content_sharing: "content_sharing",
+  invitation: "invitation",
+  intermediary_engagement: "intermediary_engagement",
+  follow_up: "follow_up",
+  no_action: "no_action",
+};
 
 const PROCESSED_STATUSES = new Set(["pending", "processed"]);
 
@@ -100,10 +106,16 @@ interface SkipReason {
 
 class Reporter {
   skips = new Map<string, number>();
+  notes = new Map<string, number>();
   errors: string[] = [];
 
   skip(reason: string) {
     this.skips.set(reason, (this.skips.get(reason) ?? 0) + 1);
+  }
+
+  /** A non-fatal data note — row is still migrated, but worth surfacing (e.g. defaulted field). */
+  note(reason: string) {
+    this.notes.set(reason, (this.notes.get(reason) ?? 0) + 1);
   }
 
   error(msg: string) {
@@ -113,6 +125,10 @@ class Reporter {
   skipList(): SkipReason[] {
     return [...this.skips.entries()].map(([reason, count]) => ({ reason, count }));
   }
+
+  noteList(): SkipReason[] {
+    return [...this.notes.entries()].map(([reason, count]) => ({ reason, count }));
+  }
 }
 
 function parseBool(raw: string | undefined): boolean {
@@ -120,8 +136,23 @@ function parseBool(raw: string | undefined): boolean {
   return v === "true" || v === "1" || v === "yes" || v === "y" || v === "x";
 }
 
+/**
+ * Strip NUL and C0 control characters (except tab/newline/CR). Postgres `text`
+ * rejects  outright, and scraped Google-Alert/LinkedIn content carries
+ * stray control bytes — sanitize before insert.
+ */
+function clean(s: string): string {
+  let out = "";
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    // keep tab(9), newline(10), CR(13); drop NUL and other C0 controls
+    if (c >= 32 || c === 9 || c === 10 || c === 13) out += s[i];
+  }
+  return out;
+}
+
 function nullable(raw: string | undefined): string | null {
-  const v = (raw ?? "").trim();
+  const v = clean((raw ?? "").trim());
   return v.length > 0 ? v : null;
 }
 
@@ -146,7 +177,7 @@ function parseDateOnly(raw: string | undefined): string | null {
 
 /** Stable content hash → deterministic id for keyless historic rows (idempotent re-import). */
 function stableId(prefix: string, parts: (string | null)[]): string {
-  const s = parts.map((p) => p ?? "").join("");
+  const s = parts.map((p) => p ?? "").join("");
   let h = 5381;
   for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) >>> 0;
   return `${prefix}_${h.toString(36)}`;
@@ -239,11 +270,15 @@ async function mapProspects(
       rep.skip("prospect: missing prospectId or fullName");
       continue;
     }
+    // The Phase 1 prospects sheet has no profileType column; default to "unknown"
+    // (set real types later in the Phase 2D admin UI). A present-but-unmappable
+    // value also defaults to "unknown" but is surfaced separately.
     const profileRaw = (r.profileType ?? "").trim().toLowerCase();
-    const profileType = PROFILE_TYPE_MAP[profileRaw];
-    if (!profileType) {
-      rep.skip(`prospect: unmapped profileType "${profileRaw || "(blank)"}"`);
-      continue;
+    const profileType = PROFILE_TYPE_MAP[profileRaw] ?? "unknown";
+    if (profileRaw && !PROFILE_TYPE_MAP[profileRaw]) {
+      rep.note(`prospect: unmapped profileType "${profileRaw}" → unknown`);
+    } else if (!profileRaw) {
+      rep.note("prospect: profileType blank → unknown");
     }
 
     let dossierProvider: "google_docs" | null = null;
@@ -265,7 +300,7 @@ async function mapProspects(
     ids.add(id);
     out.push({
       id,
-      fullName,
+      fullName: clean(fullName),
       profileType: profileType as typeof prospects.$inferInsert.profileType,
       linkedInUrl: nullable(r.linkedInUrl),
       emailEnabled: parseBool(r.emailEnabled),
@@ -299,7 +334,7 @@ function mapSources(
       rep.skip("source: orphan prospectId (no matching prospect)");
       continue;
     }
-    out.push({ id, prospectId, rssUrl });
+    out.push({ id, prospectId, rssUrl: clean(rssUrl) });
   }
   return out;
 }
@@ -333,10 +368,12 @@ function mapResults(
       rep.skip("result: unparseable pubDate");
       continue;
     }
-    const title = (r.title ?? "").trim();
+    // title is notNull in schema; Phase 1 has blank titles (esp. some alerts).
+    // Preserve the row for parity by deriving from the snippet, else a sentinel.
+    let title = (r.title ?? "").trim();
     if (!title) {
-      rep.skip("result: missing title");
-      continue;
+      title = (r.contentSnippet ?? "").trim().slice(0, 80) || "(untitled)";
+      rep.note("result: blank title → derived from snippet/(untitled)");
     }
     let processedStatus = (r.processedStatus ?? "").trim().toLowerCase();
     if (!PROCESSED_STATUSES.has(processedStatus)) processedStatus = "pending";
@@ -350,10 +387,10 @@ function mapResults(
       sourceId,
       prospectId,
       sourceType: sourceType as typeof results.$inferInsert.sourceType,
-      title,
+      title: clean(title),
       link: nullable(r.link),
       pubDate,
-      contentSnippet: (r.contentSnippet ?? "").trim(),
+      contentSnippet: clean((r.contentSnippet ?? "").trim()),
       processedStatus: processedStatus as typeof results.$inferInsert.processedStatus,
     });
   }
@@ -373,10 +410,9 @@ function mapTouchpoints(
       continue;
     }
     const ttRaw = (r.touchpointType ?? "").trim().toLowerCase().replace(/\s+/g, "_");
-    const touchpointType = TOUCHPOINT_TYPES.has(ttRaw) ? ttRaw : null;
-    if (!touchpointType) {
-      rep.skip(`touchpoint: unmapped touchpointType "${ttRaw || "(blank)"}"`);
-      continue;
+    const touchpointType = TOUCHPOINT_TYPE_MAP[ttRaw] ?? "other";
+    if (!TOUCHPOINT_TYPE_MAP[ttRaw]) {
+      rep.note(`touchpoint: touchpointType "${ttRaw || "(blank)"}" → other`);
     }
     const completedDate = parseDateOnly(r.completedDate);
     if (!completedDate) {
@@ -386,12 +422,16 @@ function mapTouchpoints(
     const summary = (r.summary ?? "").trim();
     const response = nullable(r.response);
     const nextStep = nullable(r.nextStep ?? r.notes);
+    // Prefer the sheet's natural touchpointId key; fall back to a content hash.
+    const tpId =
+      (r.touchpointId ?? "").trim() ||
+      stableId("tpa", [prospectId, completedDate, touchpointType, summary]);
     out.push({
-      id: stableId("tpa", [prospectId, completedDate, touchpointType, summary]),
+      id: tpId,
       prospectId,
       touchpointType: touchpointType as typeof touchpointsAssigned.$inferInsert.touchpointType,
       completedDate,
-      summary,
+      summary: clean(summary),
       response,
       nextStep,
     });
@@ -407,14 +447,62 @@ function chunk<T>(arr: T[], size: number): T[][] {
   return out;
 }
 
-async function commitAll(data: MappedData) {
-  const CHUNK = 200;
+/**
+ * Dedupe rows by `id` (last wins). The Phase 1 sheets can contain repeat rows
+ * sharing a primary key (e.g. the same alert captured twice); Postgres rejects
+ * an INSERT … ON CONFLICT DO UPDATE that touches the same row twice in one
+ * statement, so we collapse duplicates before upserting.
+ */
+function dedupeById<T extends { id?: string }>(rows: T[]): { rows: T[]; dropped: number } {
+  const seen = new Map<string, T>();
+  for (const r of rows) seen.set(String(r.id), r);
+  return { rows: [...seen.values()], dropped: rows.length - seen.size };
+}
 
-  for (const c of chunk(data.prospects, CHUNK)) {
-    await db
-      .insert(prospects)
-      .values(c)
-      .onConflictDoUpdate({
+/**
+ * Upsert in chunks; on a chunk failure, fall back to row-by-row so good rows
+ * still land and any genuinely-bad row is isolated and reported by id (covers
+ * both a single offending row and an oversized-batch driver rejection).
+ */
+async function upsertResilient<T extends { id?: string }>(
+  label: string,
+  rows: T[],
+  insert: (batch: T[]) => Promise<unknown>,
+  rep: Reporter
+): Promise<void> {
+  const CHUNK = 100;
+  let ok = 0;
+  let failed = 0;
+  let printed = 0;
+  for (const c of chunk(rows, CHUNK)) {
+    try {
+      await insert(c);
+      ok += c.length;
+    } catch {
+      for (const row of c) {
+        try {
+          await insert([row]);
+          ok++;
+        } catch (e) {
+          failed++;
+          if (printed++ < 10) {
+            const msg = (e as { message?: string }).message ?? String(e);
+            console.error(`    ${label} FAIL id=${row.id}: ${msg.slice(0, 90)}`);
+          }
+          rep.note(`${label}: row failed to upsert`);
+        }
+      }
+    }
+  }
+  console.log(`  ${label}: ${ok} upserted${failed ? `, ${failed} FAILED` : ""}`);
+}
+
+async function commitAll(data: MappedData, rep: Reporter) {
+  await upsertResilient(
+    "prospects",
+    data.prospects,
+    (b) =>
+      db.insert(prospects).values(b).onConflictDoUpdate({
         target: prospects.id,
         set: {
           fullName: sql`excluded.full_name`,
@@ -426,24 +514,26 @@ async function commitAll(data: MappedData) {
           dossierFileId: sql`excluded.dossier_file_id`,
           updatedAt: sql`now()`,
         },
-      });
-  }
+      }),
+    rep
+  );
 
-  for (const c of chunk(data.sources, CHUNK)) {
-    await db
-      .insert(sources)
-      .values(c)
-      .onConflictDoUpdate({
+  await upsertResilient(
+    "sources",
+    data.sources,
+    (b) =>
+      db.insert(sources).values(b).onConflictDoUpdate({
         target: sources.id,
         set: { prospectId: sql`excluded.prospect_id`, rssUrl: sql`excluded.rss_url` },
-      });
-  }
+      }),
+    rep
+  );
 
-  for (const c of chunk(data.touchpoints, CHUNK)) {
-    await db
-      .insert(touchpointsAssigned)
-      .values(c)
-      .onConflictDoUpdate({
+  await upsertResilient(
+    "touchpoints",
+    data.touchpoints,
+    (b) =>
+      db.insert(touchpointsAssigned).values(b).onConflictDoUpdate({
         target: touchpointsAssigned.id,
         set: {
           touchpointType: sql`excluded.touchpoint_type`,
@@ -452,14 +542,15 @@ async function commitAll(data: MappedData) {
           response: sql`excluded.response`,
           nextStep: sql`excluded.next_step`,
         },
-      });
-  }
+      }),
+    rep
+  );
 
-  for (const c of chunk(data.results, CHUNK)) {
-    await db
-      .insert(results)
-      .values(c)
-      .onConflictDoUpdate({
+  await upsertResilient(
+    "results",
+    data.results,
+    (b) =>
+      db.insert(results).values(b).onConflictDoUpdate({
         target: results.id,
         set: {
           sourceId: sql`excluded.source_id`,
@@ -471,8 +562,9 @@ async function commitAll(data: MappedData) {
           contentSnippet: sql`excluded.content_snippet`,
           processedStatus: sql`excluded.processed_status`,
         },
-      });
-  }
+      }),
+    rep
+  );
 }
 
 // ---------- Main ----------
@@ -498,6 +590,11 @@ async function main() {
     `Raw rows — prospects:${prospectRows.length} sources:${sourceRows.length} ` +
       `results:${resultRows.length} touchpoints:${touchpointRows.length}\n`
   );
+  console.log("Detected headers (column names only):");
+  console.log(`  prospects:   ${JSON.stringify(Object.keys(prospectRows[0] ?? {}))}`);
+  console.log(`  sources:     ${JSON.stringify(Object.keys(sourceRows[0] ?? {}))}`);
+  console.log(`  results:     ${JSON.stringify(Object.keys(resultRows[0] ?? {}))}`);
+  console.log(`  touchpoints: ${JSON.stringify(Object.keys(touchpointRows[0] ?? {}))}\n`);
 
   const { rows: mappedProspects, ids: validProspectIds } = await mapProspects(
     prospectRows,
@@ -509,22 +606,36 @@ async function main() {
   const mappedResults = mapResults(resultRows, validProspectIds, validSourceIds, rep);
   const mappedTouchpoints = mapTouchpoints(touchpointRows, validProspectIds, rep);
 
+  // Collapse duplicate primary keys before upsert (see dedupeById).
+  const dedupProspects = dedupeById(mappedProspects);
+  const dedupSources = dedupeById(mappedSources);
+  const dedupResults = dedupeById(mappedResults);
+  const dedupTouchpoints = dedupeById(mappedTouchpoints);
+  for (const [name, d] of [
+    ["prospects", dedupProspects],
+    ["sources", dedupSources],
+    ["results", dedupResults],
+    ["touchpoints", dedupTouchpoints],
+  ] as const) {
+    if (d.dropped > 0) rep.note(`${name}: ${d.dropped} duplicate-id row(s) collapsed`);
+  }
+
   const data: MappedData = {
-    prospects: mappedProspects,
-    sources: mappedSources,
-    results: mappedResults,
-    touchpoints: mappedTouchpoints,
+    prospects: dedupProspects.rows,
+    sources: dedupSources.rows,
+    results: dedupResults.rows,
+    touchpoints: dedupTouchpoints.rows,
     validProspectIds,
   };
 
   console.log("Mapped (ready to upsert):");
-  console.log(`  prospects:    ${mappedProspects.length}`);
-  console.log(`  sources:      ${mappedSources.length}`);
-  console.log(`  results:      ${mappedResults.length}`);
-  console.log(`  touchpoints:  ${mappedTouchpoints.length}`);
+  console.log(`  prospects:    ${data.prospects.length}`);
+  console.log(`  sources:      ${data.sources.length}`);
+  console.log(`  results:      ${data.results.length}`);
+  console.log(`  touchpoints:  ${data.touchpoints.length}`);
 
-  const withDossierCount = mappedProspects.filter((p) => p.dossierFileId).length;
-  console.log(`  (prospects with resolved dossier: ${withDossierCount}/${mappedProspects.length})`);
+  const withDossierCount = data.prospects.filter((p) => p.dossierFileId).length;
+  console.log(`  (prospects with resolved dossier: ${withDossierCount}/${data.prospects.length})`);
 
   const skips = rep.skipList();
   if (skips.length) {
@@ -534,6 +645,14 @@ async function main() {
     }
   } else {
     console.log("\nNo rows skipped.");
+  }
+
+  const notes = rep.noteList();
+  if (notes.length) {
+    console.log("\nData notes (row migrated, field adjusted → count):");
+    for (const { reason, count } of notes.sort((a, b) => b.count - a.count)) {
+      console.log(`  ${count.toString().padStart(4)}  ${reason}`);
+    }
   }
 
   // Transcript-safe sample (no PII)
@@ -557,13 +676,21 @@ async function main() {
   }
 
   console.log("\nCommitting (prospects → sources → touchpoints → results)…");
-  await commitAll(data);
+  await commitAll(data, rep);
   console.log("Commit complete. Re-run to verify idempotency (counts should be unchanged).\n");
 }
 
 main()
   .then(() => process.exit(0))
   .catch((err) => {
-    console.error("\nMIGRATION FAILED:", err instanceof Error ? err.message : err);
+    const e = err as Record<string, unknown> & { message?: string };
+    console.error("\nMIGRATION FAILED:", (e.message ?? String(err)).slice(0, 300));
+    // Surface Postgres/Neon error metadata without dumping the (huge) query/params.
+    const skip = new Set(["message", "query", "params", "stack"]);
+    for (const k of Object.getOwnPropertyNames(e)) {
+      if (skip.has(k)) continue;
+      const v = e[k];
+      if (v != null && typeof v !== "object") console.error(`  ${k}: ${String(v).slice(0, 200)}`);
+    }
     process.exit(1);
   });

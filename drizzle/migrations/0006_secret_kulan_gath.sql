@@ -1,0 +1,1 @@
+ALTER TYPE "public"."touchpoint_type" ADD VALUE 'other';

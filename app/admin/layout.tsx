@@ -5,7 +5,10 @@ const NAV = [
   { href: "/admin", label: "Dashboard" },
   { href: "/admin/prospects", label: "Prospects" },
   { href: "/admin/sources", label: "Sources" },
-  // Results, Touchpoints, Briefings, Health land in the next 2D chunk.
+  { href: "/admin/results", label: "Results" },
+  { href: "/admin/touchpoints", label: "Touchpoints" },
+  { href: "/admin/briefings", label: "Briefings" },
+  { href: "/admin/health", label: "Health" },
 ];
 
 export default async function AdminLayout({

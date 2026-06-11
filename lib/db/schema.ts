@@ -73,6 +73,9 @@ export const profileType = pgEnum("profile_type", [
   "connector",
   "credibility_node",
   "collaborator",
+  // Phase 2F: the Phase 1 prospects sheet has no profileType column, so migrated
+  // rows land here until classified in the Phase 2D admin UI.
+  "unknown",
 ]);
 
 export const dossierProvider = pgEnum("dossier_provider", [
@@ -138,6 +141,10 @@ export const touchpointType = pgEnum("touchpoint_type", [
   "intermediary_engagement",
   "follow_up",
   "no_action",
+  // Phase 2F: historic touchpoint sheet uses a channel/shorthand vocab that
+  // doesn't map cleanly (e.g. "email"); imported rows land here until refined.
+  // The agent never emits this value — it's import-only.
+  "other",
 ]);
 
 export const touchpointReviewStatus = pgEnum("touchpoint_review_status", [

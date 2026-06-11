@@ -146,7 +146,16 @@ function clean(s: string): string {
   for (let i = 0; i < s.length; i++) {
     const c = s.charCodeAt(i);
     // keep tab(9), newline(10), CR(13); drop NUL and other C0 controls
-    if (c >= 32 || c === 9 || c === 10 || c === 13) out += s[i];
+    if (c < 32 && c !== 9 && c !== 10 && c !== 13) continue;
+    // drop unpaired surrogates — Postgres rejects them as invalid UTF-8
+    if (c >= 0xd800 && c <= 0xdbff) {
+      const next = s.charCodeAt(i + 1);
+      if (!(next >= 0xdc00 && next <= 0xdfff)) continue; // lone high surrogate
+    } else if (c >= 0xdc00 && c <= 0xdfff) {
+      const prev = s.charCodeAt(i - 1);
+      if (!(prev >= 0xd800 && prev <= 0xdbff)) continue; // lone low surrogate
+    }
+    out += s[i];
   }
   return out;
 }

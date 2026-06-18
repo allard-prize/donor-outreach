@@ -149,6 +149,38 @@ describe("invariant check", () => {
   });
 });
 
+describe("conditional why-now invariant (eval-cases whyNowCheck)", () => {
+  // Mirrors lib/llm/eval-cases.ts whyNowCheck — proves the path-rewrite leaves
+  // `.toLowerCase().indexOf(...)` intact and the no_action branch is exempt.
+  const check: BinaryCheck = {
+    check_id: "why-now-prefix",
+    kind: "invariant",
+    rule: "potential_touchpoint.touchpoint_type === 'no_action' || potential_touchpoint.engagement_rationale.toLowerCase().indexOf('why now') === 0",
+  };
+
+  it("passes an action output that starts with 'Why now:'", () => {
+    expect(runBinaryCheck(check, ctxFor(parsedOutput())).passed).toBe(true);
+  });
+
+  it("fails an action output missing the prefix", () => {
+    const p = parsedOutput();
+    (p.potential_touchpoint as Record<string, unknown>).engagement_rationale =
+      "Scoring rationale: the appointment is fresh and mission-aligned.";
+    expect(runBinaryCheck(check, ctxFor(p)).passed).toBe(false);
+  });
+
+  it("exempts a no_action output (no prefix required)", () => {
+    const p = parsedOutput();
+    p.potential_touchpoint = {
+      touchpoint_type: "no_action",
+      priority_score: 5,
+      engagement_rationale: "Scoring rationale: cold relationship, no access path.",
+      draft_content: "No outreach recommended at this time.",
+    };
+    expect(runBinaryCheck(check, ctxFor(p)).passed).toBe(true);
+  });
+});
+
 describe("rule-table check", () => {
   const check: BinaryCheck = {
     check_id: "score-type-pairs",

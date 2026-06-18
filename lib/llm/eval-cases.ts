@@ -44,12 +44,16 @@ const groundingCheck: BinaryCheck = {
   stoplist: ["Why Now", "Allard Prize"],
 };
 
+// Conditional "Why now:" prefix: the prompt only requires it when the
+// touchpoint is an action (type != no_action). Expressed as an invariant so a
+// legitimate no_action output is exempt — an unconditional regex would false-
+// positive whenever the model correctly declines outreach. (The invariant
+// runner prefixes dotted paths with `o.`; method calls after `()` are left
+// alone, so `.indexOf(...)` survives the rewrite.)
 const whyNowCheck: BinaryCheck = {
   check_id: "why-now-prefix",
-  kind: "regex",
-  field: "parsed_output.potential_touchpoint.engagement_rationale",
-  patterns: ["^\\s*why\\s+now\\s*:"],
-  must_match: true,
+  kind: "invariant",
+  rule: "potential_touchpoint.touchpoint_type === 'no_action' || potential_touchpoint.engagement_rationale.toLowerCase().indexOf('why now') === 0",
 };
 
 const noActionInvariant: BinaryCheck = {
@@ -92,12 +96,12 @@ const noActionRubric: RubricQuestion[] = [
 
 export const CURATED_EVAL_CASES: CuratedEvalCase[] = [
   {
-    label: "award-win-congratulations",
+    label: "warm-contact-award-congratulations",
     promptVersion: "v1",
     input: {
       fullName: "Jordan Avery",
       contextText:
-        "Institutional funder. Program director at the fictional Meridian Justice Foundation. Strong mission alignment with anti-corruption work. No prior direct contact.",
+        "Institutional funder. Program director at the fictional Meridian Justice Foundation. Active, warm relationship — met the Allard Prize team at a 2025 governance forum, exchanged emails twice, and replied positively to a prior note. Strong mission alignment with anti-corruption work.",
       results: [
         {
           alert_source: "google_alert",
@@ -108,12 +112,18 @@ export const CURATED_EVAL_CASES: CuratedEvalCase[] = [
           pubDate: "2026-06-14",
         },
       ],
-      touchpoints: [],
+      touchpoints: [
+        {
+          touchpoint_type: "content_sharing",
+          completed_date: "2026-02-10",
+          summary: "Shared an Allard Prize report on judicial independence; Jordan Avery replied warmly.",
+        },
+      ],
     },
     binaryChecks: [groundingCheck, whyNowCheck],
     rubric: actionRubric,
     expectedBehavior:
-      "A fresh, dated, mission-aligned appointment is a clear opening. Expect a high priority_score (>=8), a congratulations-type touchpoint, a 'Why now:' rationale referencing the appointment, and a brief, warm draft that does not over-claim a prior relationship.",
+      "A fresh, dated, mission-aligned appointment on top of an existing warm relationship with a real access path is a clear opening. Expect a high priority_score (>=8), a congratulations-type touchpoint, a 'Why now:' rationale referencing the appointment, and a brief, warm draft grounded in the input.",
   },
   {
     label: "stale-no-signal-monitor-only",

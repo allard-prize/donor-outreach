@@ -422,3 +422,16 @@ export const evalRuns = pgTable(
     modelIdx: index("eval_run_model_idx").on(t.model),
   })
 );
+
+// ---------- Phase 2G: durable OAuth token store ----------
+//
+// Microsoft Graph delegated (B2B-guest) refresh tokens rotate on every
+// redemption. A read-only serverless filesystem can't persist the rotation, so
+// the token lives here: the dossier reader reads the current refresh token,
+// redeems it, and writes the rotated token back in one place. Keyed by purpose
+// (e.g. "msgraph_dossier").
+export const appTokens = pgTable("app_token", {
+  key: text("key").primaryKey(),
+  refreshToken: text("refresh_token").notNull(),
+  updatedAt: timestamp("updated_at", { mode: "date" }).notNull().defaultNow(),
+});

@@ -25,21 +25,24 @@ function env(name: string): string | undefined {
   return process.env[`MSGRAPH_${name}`] ?? process.env[`ONEDRIVE_OAUTH_${name}`];
 }
 
-export type TokenResult = { accessToken: string; refreshToken?: string };
+export type TokenResult = { accessToken: string; refreshToken?: string; expiresIn?: number };
 
 /**
- * Redeem the stored refresh token for a Graph access token. Calls
- * `persistRefreshToken` with the rotated token when one comes back.
+ * Redeem a refresh token for a Graph access token. Uses `opts.refreshToken`
+ * when given (the durable token store passes the Postgres-held token), else the
+ * env value. Calls `persistRefreshToken` with the rotated token when one comes
+ * back (Microsoft rotates on every redemption).
  */
 export async function getGraphToken(opts?: {
+  refreshToken?: string;
   persistRefreshToken?: (token: string) => Promise<void>;
 }): Promise<TokenResult> {
   const tenant = env("TENANT_ID");
   const clientId = env("CLIENT_ID");
-  const refreshToken = env("REFRESH_TOKEN");
+  const refreshToken = opts?.refreshToken ?? env("REFRESH_TOKEN");
   if (!tenant || !clientId || !refreshToken) {
     throw new Error(
-      "Missing Graph OAuth env: need ONEDRIVE_OAUTH_TENANT_ID / _CLIENT_ID / _REFRESH_TOKEN (or MSGRAPH_*)"
+      "Missing Graph OAuth: need a refresh token + ONEDRIVE_OAUTH_TENANT_ID / _CLIENT_ID (or MSGRAPH_*)"
     );
   }
 
@@ -59,6 +62,7 @@ export async function getGraphToken(opts?: {
   const json = (await res.json()) as {
     access_token?: string;
     refresh_token?: string;
+    expires_in?: number;
     error?: string;
     error_description?: string;
   };
@@ -73,7 +77,11 @@ export async function getGraphToken(opts?: {
   if (json.refresh_token && opts?.persistRefreshToken) {
     await opts.persistRefreshToken(json.refresh_token);
   }
-  return { accessToken: json.access_token, refreshToken: json.refresh_token };
+  return {
+    accessToken: json.access_token,
+    refreshToken: json.refresh_token,
+    expiresIn: json.expires_in,
+  };
 }
 
 export async function graphFetch(

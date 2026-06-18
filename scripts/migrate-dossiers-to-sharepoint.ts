@@ -185,17 +185,28 @@ async function repoint(token: string, commit: boolean): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  // --read <driveId:itemId>: verify the production reader against an uploaded file.
+  // --seed-token: copy the env refresh token into the Postgres token store (run
+  // once, locally, AFTER any .env.local-based op, before relying on the store).
+  if (process.argv.includes("--seed-token")) {
+    const { seedTokenStoreFromEnv } = await import("@/lib/msgraph/token-store");
+    await seedTokenStoreFromEnv();
+    console.log("[2g] token store seeded from env (app_token: msgraph_dossier)");
+    return;
+  }
+
+  // --read <driveId:itemId>: verify the production reader (via the token store).
   const readRef = argValue("--read");
   if (process.argv.includes("--repoint")) {
-    const { accessToken } = await getGraphToken({ persistRefreshToken });
-    await repoint(accessToken, process.argv.includes("--commit"));
+    // Repoint reads SharePoint to map filenames → item ids; use the token store
+    // so there's a single token source of truth going forward.
+    const { getStoredGraphToken } = await import("@/lib/msgraph/token-store");
+    await repoint(await getStoredGraphToken(), process.argv.includes("--commit"));
     return;
   }
   if (readRef) {
     const { readSharePointDossier } = await import("@/lib/dossiers/onedrive");
-    const text = await readSharePointDossier(readRef, { persistRefreshToken });
-    console.log(`[2g] read ${readRef} → ${text.length} chars`);
+    const text = await readSharePointDossier(readRef);
+    console.log(`[2g] read (token store) ${readRef} -> ${text.length} chars`);
     console.log("[2g] first 240 chars:\n" + text.slice(0, 240));
     return;
   }

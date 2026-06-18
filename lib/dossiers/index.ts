@@ -1,10 +1,14 @@
 import { readGoogleDocsDossier } from "@/lib/dossiers/google-docs";
+import { readSharePointDossier } from "@/lib/dossiers/onedrive";
 
 export type DossierProvider = "google_docs" | "onedrive";
 
 export type DossierFetchInput = {
   provider: DossierProvider | null | undefined;
   fileId: string | null | undefined;
+  // Optional pre-acquired Graph access token — acquire once per cron run for the
+  // onedrive/SharePoint provider rather than redeeming the token per prospect.
+  graphAccessToken?: string;
 };
 
 /**
@@ -18,7 +22,7 @@ export async function getDossierText(input: DossierFetchInput): Promise<string> 
     case "google_docs":
       return readGoogleDocsDossier(input.fileId);
     case "onedrive":
-      throw new Error("dossierProvider=onedrive is not implemented until Phase 2G");
+      return readSharePointDossier(input.fileId, { accessToken: input.graphAccessToken });
     default: {
       const _exhaustive: never = input.provider;
       throw new Error(`Unknown dossierProvider: ${_exhaustive as string}`);

@@ -18,7 +18,7 @@ The repo is owned by `allard-prize-alerts` on GitHub and may be public at any ti
 **Phase 1 reference**: `~/gdrive-brianpkm/3-Resources/allard-prize-donor-outreach-spec.md` (reverse-engineered from n8n JSON at `~/workspace/workflows/allard-prize/ap-donor-outreach/`)
 **Project tracker**: `~/gdrive-brianpkm/1-Projects/Allard Prize Donor Outreach System.md`
 
-**Status**: Phases 2A–2E code-complete. Capture + decision paths, admin UI, and the eval harness (Phase 2E) are in `main`; the 2F migration script has been run against prod Neon (44 prospects, 4218 results). Remaining before live cron arm: apply the 2E migration + seed eval cases to prod, run the live eval proof, then the 2F cutover window with Preet. Phase 2G (dossiers → Allard SharePoint) is the last external dependency.
+**Status**: Phases 2A–2E code-complete (eval harness in `main`); 2F migration run against prod Neon (44 prospects, 4218 results). Phase 2G dossier code is built: all 37 dossiers copied from the source Google Drive folder to the Allard SharePoint Context library (Doc→`.docx`), and `lib/dossiers/onedrive.ts` reads them back via Graph + mammoth (verified). Remaining before live cron arm: (1) the SharePoint **repoint** cutover (`scripts/migrate-dossiers-to-sharepoint.ts --repoint --commit` — dry-run matches 37/37) once the serverless Graph-token story is settled (app-only `Sites.Selected` grant, preferred, or a Postgres token store), (2) apply the 2E migration + seed eval cases + run the live eval proof, (3) the 2F cutover window with Preet.
 
 **No external Google dependency by design**: per Brian, the productionalized system holds all editable data in Postgres (UI-editable) and document files in Microsoft SharePoint/OneDrive (Phase 2G). No Google Sheet/Doc is a runtime dependency — eval cases live in the `eval_case` table, not the Phase 1 Eval sheet.
 
@@ -95,9 +95,11 @@ lib/
     render-briefing.ts       # per-prospect HTML — preserves Phase 1 layout byte-for-byte
     send-briefing.ts         # Gmail send + briefings row insert (2C)
   dossiers/
-    index.ts                 # dossierProvider dispatcher
-    google-docs.ts           # Docs API read (2C; dead code after 2G cleanup)
-    onedrive.ts              # OneDrive read via MS Graph (Phase 2G)
+    index.ts                 # dossierProvider dispatcher (google_docs + onedrive)
+    google-docs.ts           # Docs API read (2C; retire after the SharePoint repoint cutover)
+    onedrive.ts              # SharePoint dossier read via MS Graph + mammoth (2G)
+  msgraph/
+    client.ts                # Graph auth (B2B-guest refresh token) + shares/upload helpers (2G)
 drizzle/
   migrations/          # drizzle-kit-generated SQL migrations
 auth.ts                # Auth.js v5 config
@@ -106,6 +108,7 @@ drizzle.config.ts
 vercel.json            # framework=nextjs + cron schedules
 scripts/
   lint-destructive-migrations.mjs
+  migrate-dossiers-to-sharepoint.ts  # 2G: Drive→SharePoint copy (Doc→docx), --probe/--read/--repoint
   seed-eval-cases.ts         # curated cases → eval_case table (2E)
   run-eval.ts                # live eval proof tool → eval_run row (2E)
 ```

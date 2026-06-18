@@ -18,7 +18,9 @@ The repo is owned by `allard-prize-alerts` on GitHub and may be public at any ti
 **Phase 1 reference**: `~/gdrive-brianpkm/3-Resources/allard-prize-donor-outreach-spec.md` (reverse-engineered from n8n JSON at `~/workspace/workflows/allard-prize/ap-donor-outreach/`)
 **Project tracker**: `~/gdrive-brianpkm/1-Projects/Allard Prize Donor Outreach System.md`
 
-**Status**: Phase 2C decision path code-complete (agent, dossier loader, briefing send, donor-outreach cron handler). Awaiting fixture-based smoke + 2F data migration before live cron arm.
+**Status**: Phases 2A–2E code-complete. Capture + decision paths, admin UI, and the eval harness (Phase 2E) are in `main`; the 2F migration script has been run against prod Neon (44 prospects, 4218 results). Remaining before live cron arm: apply the 2E migration + seed eval cases to prod, run the live eval proof, then the 2F cutover window with Preet. Phase 2G (dossiers → Allard SharePoint) is the last external dependency.
+
+**No external Google dependency by design**: per Brian, the productionalized system holds all editable data in Postgres (UI-editable) and document files in Microsoft SharePoint/OneDrive (Phase 2G). No Google Sheet/Doc is a runtime dependency — eval cases live in the `eval_case` table, not the Phase 1 Eval sheet.
 
 ---
 
@@ -50,7 +52,7 @@ pnpm db:studio            # Drizzle Studio (local DB browser)
 - **Destructive migrations**: Any drizzle-kit-generated SQL containing `DROP TABLE`, `DROP COLUMN`, `ALTER COLUMN ... TYPE`, etc. must have `-- DESTRUCTIVE` as the first line of the migration `.sql` file. CI rejects unannotated destructives. Add the annotation by hand after running `pnpm db:generate`.
 - **Auth allowlist**: `ADMIN_ALLOWED_EMAILS` is a comma-separated lowercased email list. Sign-in is blocked for anything not on the list — no public signup.
 - **Cost cap**: OpenRouter spend cap is `$25/mo` — enforced at the OpenRouter dashboard level. Per-call cost is logged to `cron_runs.llm_cost_usd` so runaway loops surface in `/admin/health` within hours.
-- **Eval rubric**: Preserved from Phase 1 — violation-count + 6-kind binary_check + JSON contract validator + string-similarity. Implementation lives at `lib/llm/judge.ts` (Phase 2E).
+- **Eval rubric**: Preserved from the Phase 1 C.2 harness — per-case violation count = failed binary checks + contract violation (0/1) + LLM rubric-judge violations. The 6 binary-check kinds (regex, schema, enum-membership, invariant, rule-table, cross-reference) live in `lib/llm/judge.ts`; the contract validator in `lib/llm/contract.ts`; the Haiku rubric judge in `lib/llm/rubric-judge.ts`. String-similarity was a C.1 holdover and is intentionally not ported (the C.2 harness replaced it with the rubric judge).
 
 ---
 
@@ -83,8 +85,12 @@ lib/
     aggregate.ts             # pending-results → per-prospect payload (Clean Results port)
     donor-outreach.ts        # orchestrator used by the cron handler
     prompts.ts               # loads prompts/agent-{system,user}-v1.md
-    schema.ts                # agent output Zod schema + invariants
-    judge.ts                 # eval-harness judge (Phase 2E)
+    schema.ts                # agent output Zod schema + invariants (single enum source)
+    contract.ts              # Phase 1 contract validator port (2E) — reuses schema.ts enums
+    judge.ts                 # deterministic eval judge: 6 binary checks + aggregation (2E)
+    rubric-judge.ts          # Haiku 4.5 LLM rubric judge (2E)
+    eval-cases.ts            # curated synthetic eval cases + reusable checks (2E)
+    __tests__/               # Vitest unit suite for contract + judge (CI gate)
   email/
     render-briefing.ts       # per-prospect HTML — preserves Phase 1 layout byte-for-byte
     send-briefing.ts         # Gmail send + briefings row insert (2C)
@@ -100,7 +106,26 @@ drizzle.config.ts
 vercel.json            # framework=nextjs + cron schedules
 scripts/
   lint-destructive-migrations.mjs
+  seed-eval-cases.ts         # curated cases → eval_case table (2E)
+  run-eval.ts                # live eval proof tool → eval_run row (2E)
 ```
+
+## Eval harness (Phase 2E)
+
+Ports the Phase 1 n8n C.2 harness to Postgres + Vitest. Two layers:
+
+- **Deterministic** (`lib/llm/contract.ts` + `judge.ts`) — runs in CI via `pnpm test` on every PR. Free, fast, no LLM. This is the regression net for the rubric logic.
+- **Live** (`pnpm test:eval`) — runs cases through the agent (real OpenRouter) + the Haiku rubric judge, writes an `eval_run` row, surfaced in `/admin/health`. Manual only (spends tokens, hits Postgres); NOT a CI gate — running the full historical set in CI is cost-prohibitive vs the $25/mo cap.
+
+```bash
+pnpm test                 # deterministic eval suite (CI gate)
+pnpm db:migrate           # apply the eval_case / eval_run tables
+pnpm seed:eval-cases      # load curated cases into eval_case
+pnpm test:eval            # live eval proof (default model)
+pnpm test:eval --model anthropic/claude-sonnet-4.6 --limit 2 --max-cost 1
+```
+
+**Proof gate**: run `pnpm test:eval` on the v1 prompt, then on a model swap, and confirm the violation counts hold. Eval cases are Postgres-resident (`eval_case`, UI-editable later) — no Google Sheet dependency.
 
 ## Cron handler invariants
 
@@ -146,4 +171,4 @@ Exits non-zero on any assertion miss. Safe against `.env.local` (Neon prod) beca
 
 ---
 
-**Last Updated**: 2026-05-22
+**Last Updated**: 2026-06-18

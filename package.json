@@ -9,6 +9,10 @@
     "start": "next start",
     "lint": "eslint",
     "lint:migrations": "node scripts/lint-destructive-migrations.mjs",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:eval": "tsx --env-file=.env.local scripts/run-eval.ts",
+    "seed:eval-cases": "tsx --env-file=.env.local scripts/seed-eval-cases.ts",
     "migrate:sheets": "tsx --env-file=.env.local scripts/migrate-sheets-to-postgres.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "dotenv -e .env.local -- drizzle-kit migrate",
@@ -33,12 +37,14 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@vitest/coverage-v8": "^4.1.9",
     "dotenv-cli": "^11.0.0",
     "drizzle-kit": "^0.31.10",
     "eslint": "^9",
     "eslint-config-next": "16.2.6",
     "tailwindcss": "^4",
     "tsx": "^4.22.3",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.1.9"
   }
 }

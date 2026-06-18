@@ -50,6 +50,13 @@
       "when": 1781106154681,
       "tag": "0006_secret_kulan_gath",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1781794346601,
+      "tag": "0007_curved_human_torch",
+      "breakpoints": true
     }
   ]
 }

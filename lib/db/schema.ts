@@ -160,6 +160,12 @@ export const briefingStatus = pgEnum("briefing_status", [
   "partial",
 ]);
 
+export const evalRunStatus = pgEnum("eval_run_status", [
+  "running",
+  "completed",
+  "failed",
+]);
+
 // ---------- Domain tables ----------
 
 export const prospects = pgTable(
@@ -348,5 +354,71 @@ export const touchpointsPotential = pgTable(
     priorityScoreIdx: index("touchpoint_potential_priority_score_idx").on(
       t.priorityScore
     ),
+  })
+);
+
+// ---------- Phase 2E: eval-harness tables ----------
+//
+// Ports the Phase 1 n8n eval harness (ap-eval-harness.json) to Postgres.
+// A case carries the agent input payload plus the Phase 1 rubric machinery:
+// a `binaryChecks` array (the 6-kind deterministic battery) and a `rubric`
+// array (binary "did this violate?" questions answered by the LLM judge).
+
+export const evalCases = pgTable(
+  "eval_case",
+  {
+    id: text("id").primaryKey().$defaultFn(createId),
+    // Human-readable case identity (Phase 1 sheet `case_id` / a descriptive slug).
+    label: text("label").notNull(),
+    promptVersion: text("prompt_version").notNull().default("v1"),
+    // Agent input payload rendered into the user prompt:
+    // { fullName, contextText, results, touchpoints }.
+    input: jsonb("input").$type<Record<string, unknown>>().notNull(),
+    // Phase 1 `binary_check` specs — array of the 6-kind check objects.
+    binaryChecks: jsonb("binary_checks")
+      .$type<unknown[]>()
+      .notNull()
+      .default([]),
+    // Phase 1 `rubric` — array of binary questions for the LLM judge.
+    rubric: jsonb("rubric").$type<unknown[]>().notNull().default([]),
+    // Phase 1 `expected_behavior` — free-text behavioural reference for the judge.
+    expectedBehavior: text("expected_behavior").notNull().default(""),
+    // Optional ground-truth output (Phase 1 `expectedOutput`), kept for reference.
+    expectedOutput: jsonb("expected_output").$type<unknown>(),
+    active: boolean("active").notNull().default(true),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+  },
+  (t) => ({
+    activeIdx: index("eval_case_active_idx").on(t.active),
+    promptVersionIdx: index("eval_case_prompt_version_idx").on(t.promptVersion),
+  })
+);
+
+export const evalRuns = pgTable(
+  "eval_run",
+  {
+    id: text("id").primaryKey().$defaultFn(createId),
+    model: text("model").notNull(),
+    promptVersion: text("prompt_version").notNull(),
+    startedAt: timestamp("started_at", { mode: "date" }).notNull().defaultNow(),
+    completedAt: timestamp("completed_at", { mode: "date" }),
+    status: evalRunStatus("status").notNull().default("running"),
+    caseCount: integer("case_count").notNull().default(0),
+    // Cases with zero total violations (the strict pass bar).
+    casesPassed: integer("cases_passed").notNull().default(0),
+    totalViolations: integer("total_violations").notNull().default(0),
+    contractViolations: integer("contract_violations").notNull().default(0),
+    binaryViolations: integer("binary_violations").notNull().default(0),
+    rubricViolations: integer("rubric_violations").notNull().default(0),
+    llmCostUsd: numeric("llm_cost_usd", { precision: 10, scale: 4 })
+      .notNull()
+      .default("0"),
+    errorMessage: text("error_message"),
+    // Per-case breakdown + run options for drill-down.
+    metadata: jsonb("metadata").$type<Record<string, unknown>>(),
+  },
+  (t) => ({
+    startedAtIdx: index("eval_run_started_at_idx").on(t.startedAt),
+    modelIdx: index("eval_run_model_idx").on(t.model),
   })
 );

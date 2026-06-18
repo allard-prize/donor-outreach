@@ -24,6 +24,11 @@ jobs:
 
       - run: pnpm lint
 
+      # Deterministic eval-harness unit suite (contract + judge). Free + fast.
+      # The live LLM eval (pnpm test:eval) is run manually — it spends tokens
+      # against the OpenRouter cap and hits Postgres, so it is not a CI gate.
+      - run: pnpm test
+
       - run: pnpm build
         env:
           DATABASE_URL: postgresql://placeholder:placeholder@localhost:5432/placeholder

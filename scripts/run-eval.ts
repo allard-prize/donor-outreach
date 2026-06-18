@@ -46,6 +46,7 @@ async function main(): Promise<void> {
   const maxCost = Number(argValue("--max-cost") ?? "5");
   const onlyCase = argValue("--case");
   const dryRun = process.argv.includes("--dry-run");
+  const verbose = process.argv.includes("--verbose");
 
   const where = onlyCase
     ? and(eq(evalCases.active, true), eq(evalCases.label, onlyCase))
@@ -128,7 +129,8 @@ async function main(): Promise<void> {
     if (agg.total === 0) casesPassed += 1;
     casesRun += 1;
 
-    const failedChecks = binaryResults.filter((r) => !r.passed).map((r) => r.check_id);
+    const failed = binaryResults.filter((r) => !r.passed);
+    const failedChecks = failed.map((r) => r.check_id);
     perCase.push({
       label: c.label,
       total: agg.total,
@@ -136,7 +138,7 @@ async function main(): Promise<void> {
       binary: agg.binary,
       rubric: agg.rubric,
       agentOk: agent.ok,
-      failedChecks,
+      failedChecks: failed.map((r) => ({ check_id: r.check_id, detail: r.detail })),
       contractErrors: contract.errors,
       judgeError: judge.ok ? null : judge.errorMessage,
     });
@@ -146,6 +148,18 @@ async function main(): Promise<void> {
       `  ${mark.padEnd(8)} ${c.label.padEnd(34)} c=${agg.contract} b=${agg.binary} r=${agg.rubric}` +
         (failedChecks.length ? `  [${failedChecks.join(", ")}]` : "")
     );
+    // Always show why a binary/contract check failed — the detail is the diagnostic.
+    for (const r of failed) {
+      if (r.detail) console.log(`           ↳ ${r.check_id}: ${r.detail}`);
+    }
+    if (agg.contract > 0) console.log(`           ↳ contract: ${contract.errors.join("; ")}`);
+    if (judge.ok === false) console.log(`           ↳ rubric-judge error: ${judge.errorMessage}`);
+    if (verbose) {
+      const pt = (ctx.parsed_output?.potential_touchpoint ?? {}) as Record<string, unknown>;
+      console.log(`           rationale: ${JSON.stringify(pt.engagement_rationale)}`);
+      console.log(`           type=${pt.touchpoint_type} score=${pt.priority_score}`);
+      console.log(`           draft: ${JSON.stringify(pt.draft_content)}`);
+    }
   }
 
   if (runId) {

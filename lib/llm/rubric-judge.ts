@@ -98,7 +98,8 @@ export async function judgeRubric(args: {
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
         "HTTP-Referer": process.env.OPENROUTER_REFERER ?? "https://github.com/allard-prize",
-        "X-Title": "Allard Prize Donor Outreach — Eval Judge",
+        // HTTP header values must be Latin1 — keep ASCII only (no em-dash).
+        "X-Title": "Allard Prize Donor Outreach Eval Judge",
       },
       body: JSON.stringify({
         model,

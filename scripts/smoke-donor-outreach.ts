@@ -76,7 +76,9 @@ function stubbedDossier(): NonNullable<DonorOutreachOptions["dossierFn"]> {
     "Profile: institutional funder. Mission alignment: high. Engagement notes: none on file.";
 }
 
-async function seedFixture(prospectId: string): Promise<{ resultIds: string[] }> {
+async function seedFixture(
+  prospectId: string
+): Promise<{ resultIds: string[]; dupId: string }> {
   await db
     .insert(prospects)
     .values({
@@ -111,9 +113,21 @@ async function seedFixture(prospectId: string): Promise<{ resultIds: string[] }>
       contentSnippet: "Fictional anti-corruption summit remarks.",
       processedStatus: "pending" as const,
     },
+    {
+      // Duplicate RSS title — deduped out of the LLM payload, so it must be
+      // resolved as `skipped` (not left pending).
+      id: `${FIXTURE_PREFIX}r3dup_${prospectId}`,
+      prospectId,
+      sourceType: "rss" as const,
+      title: "Fixture RSS headline",
+      link: "https://example.com/fixture-rss-dup",
+      pubDate: new Date("2026-05-22T12:00:00Z"),
+      contentSnippet: "Duplicate-title RSS body for skip test.",
+      processedStatus: "pending" as const,
+    },
   ];
   await db.insert(results).values(seededResults).onConflictDoNothing();
-  return { resultIds: seededResults.map((r) => r.id) };
+  return { resultIds: seededResults.map((r) => r.id), dupId: `${FIXTURE_PREFIX}r3dup_${prospectId}` };
 }
 
 async function teardownFixture(prospectId: string, resultIds: string[]): Promise<void> {
@@ -143,13 +157,30 @@ async function assertPersistedRows(prospectId: string): Promise<void> {
   }
 }
 
+async function assertResultsResolved(resultIds: string[], dupId: string): Promise<void> {
+  const rows = await db
+    .select({ id: results.id, status: results.processedStatus })
+    .from(results)
+    .where(inArray(results.id, resultIds));
+  const byId = new Map(rows.map((r) => [r.id, r.status]));
+  // No seeded result should remain pending — the queue must fully resolve.
+  const stillPending = rows.filter((r) => r.status === "pending").map((r) => r.id);
+  if (stillPending.length > 0) {
+    throw new Error(`expected no pending results, still pending: ${stillPending.join(", ")}`);
+  }
+  // The duplicate-title RSS must be skipped, not processed.
+  if (byId.get(dupId) !== "skipped") {
+    throw new Error(`expected dup result ${dupId} to be 'skipped', got '${byId.get(dupId)}'`);
+  }
+}
+
 async function main(): Promise<void> {
   if (!process.env.DATABASE_URL) {
     throw new Error("DATABASE_URL is not set — load .env.local with `pnpm tsx --env-file=.env.local`.");
   }
   const prospectId = `${FIXTURE_PREFIX}${Date.now()}`;
   console.log(`[smoke] seeding fixture prospect ${prospectId}`);
-  const { resultIds } = await seedFixture(prospectId);
+  const { resultIds, dupId } = await seedFixture(prospectId);
   let failure: unknown = null;
   try {
     const summary = await runDonorOutreach({
@@ -173,6 +204,7 @@ async function main(): Promise<void> {
       );
     }
     await assertPersistedRows(prospectId);
+    await assertResultsResolved(resultIds, dupId);
 
     const briefingRows = await db
       .select({ id: briefings.id, status: briefings.status, alertCount: briefings.alertCount })

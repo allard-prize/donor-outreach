@@ -92,6 +92,10 @@ export const sourceType = pgEnum("source_type", [
 export const processedStatus = pgEnum("processed_status", [
   "pending",
   "processed",
+  // Captured but intentionally not sent to the LLM (deduped duplicate, or RSS
+  // overflow beyond the per-prospect cap). Resolved per run so `pending` stays
+  // bounded to "not yet assessed in any run".
+  "skipped",
 ]);
 
 export const cronJobName = pgEnum("cron_job_name", [

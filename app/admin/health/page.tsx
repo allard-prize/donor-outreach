@@ -147,17 +147,26 @@ export default async function HealthPage() {
                 </td>
                 <td className="px-3 py-2">
                   {lastRun ? (
-                    <span
-                      className={
-                        lastRun.status === "success"
-                          ? "text-green-700"
-                          : lastRun.status === "failure"
-                            ? "text-red-700"
-                            : "text-amber-700"
-                      }
-                    >
-                      {lastRun.status}
-                    </span>
+                    (() => {
+                      // A run "running" for >5 min was almost certainly killed
+                      // (e.g. Vercel maxDuration) before recordRunFinish.
+                      const stale =
+                        lastRun.status === "running" &&
+                        now.getTime() - lastRun.startedAt.getTime() > 5 * 60 * 1000;
+                      return (
+                        <span
+                          className={
+                            lastRun.status === "success"
+                              ? "text-green-700"
+                              : lastRun.status === "failure" || stale
+                                ? "text-red-700"
+                                : "text-amber-700"
+                          }
+                        >
+                          {stale ? "running (stale — likely killed)" : lastRun.status}
+                        </span>
+                      );
+                    })()
                   ) : (
                     <span className="text-zinc-400">—</span>
                   )}

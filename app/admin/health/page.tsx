@@ -34,6 +34,10 @@ function fmtUtc(d: Date): string {
   return d.toISOString().replace("T", " ").slice(0, 16) + " UTC";
 }
 
+// "Run now" on donor_outreach runs the full weekly digest inline — give the
+// page's server actions the same 60s budget as the cron routes.
+export const maxDuration = 60;
+
 export default async function HealthPage() {
   // Time cutoffs computed in SQL — render must stay pure (no Date.now()).
   const [recentRuns, [mtd], recentFailures, recentEvalRuns, nowRes] = await Promise.all([

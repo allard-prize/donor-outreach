@@ -13,7 +13,7 @@ export type AgentResultItem = {
   link: string;
   pubDate: string;
   contentSnippet: string;
-  processedStatus: "pending" | "processed";
+  processedStatus: "pending" | "processed" | "skipped";
 };
 
 export type AgentTouchpoint = {
@@ -32,7 +32,11 @@ export type AggregatedProspect = {
   dossierFileId: string | null;
   results: AgentResultItem[];
   touchpoints: AgentTouchpoint[];
+  // resultIds = the cleaned subset actually passed to the LLM (→ processed).
+  // allResultIds = every pending result for the prospect; the difference
+  // (deduped / overflow) is marked `skipped` so the queue fully resolves.
   resultIds: string[];
+  allResultIds: string[];
 };
 
 /**
@@ -93,6 +97,7 @@ export async function aggregatePendingByProspect(opts?: {
         results: [],
         touchpoints: [],
         resultIds: [],
+        allResultIds: [],
       };
       grouped.set(r.prospectId, g);
     }
@@ -105,7 +110,8 @@ export async function aggregatePendingByProspect(opts?: {
       contentSnippet: r.contentSnippet,
       processedStatus: r.processedStatus,
     });
-    g.resultIds.push(r.resultId);
+    // Full pending set; the passed subset (resultIds) is set by cleanProspectPayload.
+    g.allResultIds.push(r.resultId);
   }
 
   const prospectIds = Array.from(grouped.keys());

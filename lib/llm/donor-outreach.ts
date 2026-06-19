@@ -263,6 +263,7 @@ async function scoreProspect(args: {
       runDate: args.runDate,
       agentOutput: call.output,
       resultIds: args.prospect.resultIds,
+      allResultIds: args.prospect.allResultIds,
     });
   } catch (err) {
     return {
@@ -288,8 +289,9 @@ async function persistAgentOutcome(args: {
   runDate: string;
   agentOutput: AgentOutput;
   resultIds: string[];
+  allResultIds: string[];
 }): Promise<void> {
-  const { agentOutput, prospectId, runDate, resultIds } = args;
+  const { agentOutput, prospectId, runDate, resultIds, allResultIds } = args;
   const id = `${prospectId}_${runDate}`;
   const rs = agentOutput.relationship_state;
   const tp = agentOutput.potential_touchpoint;
@@ -315,11 +317,24 @@ async function persistAgentOutcome(args: {
     .values({ id, prospectId, runDate, ...fields })
     .onConflictDoUpdate({ target: monitoringResults.id, set: { ...fields } });
 
+  const now = new Date();
   if (resultIds.length > 0) {
     await db
       .update(resultsTable)
-      .set({ processedStatus: "processed", processedAt: new Date() })
+      .set({ processedStatus: "processed", processedAt: now })
       .where(inArray(resultsTable.id, resultIds));
+  }
+
+  // Fully resolve the prospect's pending queue: everything pending that wasn't
+  // passed to the LLM (deduped duplicates + RSS overflow beyond the cap) is
+  // marked `skipped`, so `pending` doesn't accumulate run over run.
+  const passed = new Set(resultIds);
+  const skippedIds = allResultIds.filter((rid) => !passed.has(rid));
+  if (skippedIds.length > 0) {
+    await db
+      .update(resultsTable)
+      .set({ processedStatus: "skipped", processedAt: now })
+      .where(inArray(resultsTable.id, skippedIds));
   }
 }
 

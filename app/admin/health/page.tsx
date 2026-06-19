@@ -1,10 +1,42 @@
 import { and, desc, eq, gte, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { briefings, cronRuns, cronJobName, evalRuns } from "@/lib/db/schema";
+import { RunNowButton } from "./run-now-button";
+
+// Mirrors vercel.json. null = no schedule (health_check has no cron route).
+const CRON_SCHEDULES: Record<string, { expr: string; label: string } | null> = {
+  rss: { expr: "0 6 * * *", label: "daily 06:00" },
+  email_capture: { expr: "30 6 * * *", label: "daily 06:30" },
+  linkedin_scrape: { expr: "0 23 * * 1", label: "Mon 23:00" },
+  donor_outreach: { expr: "0 9 * * 2", label: "Tue 09:00" },
+  health_check: null,
+};
+
+// Next fire of a simple cron (`M H * * D` or `M H * * *`) at/after `now`, in UTC.
+function nextCronRun(expr: string, now: Date): Date {
+  const [min, hr, , , dow] = expr.split(" ");
+  const d = new Date(now);
+  d.setUTCHours(Number(hr), Number(min), 0, 0);
+  if (dow === "*") {
+    if (d <= now) d.setUTCDate(d.getUTCDate() + 1);
+  } else {
+    const target = Number(dow);
+    let guard = 0;
+    while ((d.getUTCDay() !== target || d <= now) && guard < 14) {
+      d.setUTCDate(d.getUTCDate() + 1);
+      guard += 1;
+    }
+  }
+  return d;
+}
+
+function fmtUtc(d: Date): string {
+  return d.toISOString().replace("T", " ").slice(0, 16) + " UTC";
+}
 
 export default async function HealthPage() {
   // Time cutoffs computed in SQL — render must stay pure (no Date.now()).
-  const [recentRuns, [mtd], recentFailures, recentEvalRuns] = await Promise.all([
+  const [recentRuns, [mtd], recentFailures, recentEvalRuns, nowRes] = await Promise.all([
     db
       .select()
       .from(cronRuns)
@@ -28,17 +60,24 @@ export default async function HealthPage() {
       )
       .orderBy(desc(cronRuns.startedAt)),
     db.select().from(evalRuns).orderBy(desc(evalRuns.startedAt)).limit(5),
+    db.execute(sql`select now() as now`),
   ]);
 
   const latestEval = recentEvalRuns[0];
+  // `now` from SQL (not Date.now()) so the render stays pure.
+  const now = new Date(String(nowRes.rows[0]?.now ?? ""));
 
-  // Last run + last success per job, computed over the recent window.
+  // Last run + last success per job + schedule/next-run, over the recent window.
   const jobs = cronJobName.enumValues.map((job) => {
     const runs = recentRuns.filter((r) => r.jobName === job);
+    const sched = CRON_SCHEDULES[job] ?? null;
     return {
       job,
       lastRun: runs[0],
       lastSuccess: runs.find((r) => r.status === "success"),
+      schedule: sched,
+      nextRun: sched ? nextCronRun(sched.expr, now) : null,
+      runnable: sched != null,
     };
   });
 
@@ -77,16 +116,17 @@ export default async function HealthPage() {
               <th className="px-3 py-2 font-medium">Job</th>
               <th className="px-3 py-2 font-medium">Last run</th>
               <th className="px-3 py-2 font-medium">Last status</th>
-              <th className="px-3 py-2 font-medium">Last success</th>
+              <th className="px-3 py-2 font-medium">Next run</th>
               <th className="px-3 py-2 font-medium">Items</th>
+              <th className="px-3 py-2 font-medium"></th>
             </tr>
           </thead>
           <tbody>
-            {jobs.map(({ job, lastRun, lastSuccess }) => (
+            {jobs.map(({ job, lastRun, schedule, nextRun, runnable }) => (
               <tr key={job} className="border-t border-zinc-100">
                 <td className="px-3 py-2 font-mono text-xs">{job}</td>
                 <td className="px-3 py-2 text-zinc-500">
-                  {lastRun ? lastRun.startedAt.toISOString().replace("T", " ").slice(0, 16) + " UTC" : "never"}
+                  {lastRun ? fmtUtc(lastRun.startedAt) : "never"}
                 </td>
                 <td className="px-3 py-2">
                   {lastRun ? (
@@ -105,12 +145,29 @@ export default async function HealthPage() {
                     <span className="text-zinc-400">—</span>
                   )}
                 </td>
-                <td className="px-3 py-2 text-zinc-500">
-                  {lastSuccess
-                    ? lastSuccess.startedAt.toISOString().replace("T", " ").slice(0, 16) + " UTC"
-                    : "none in window"}
+                <td className="px-3 py-2 whitespace-nowrap text-zinc-500">
+                  {nextRun ? (
+                    <>
+                      {fmtUtc(nextRun)}
+                      <span className="ml-1 text-xs text-zinc-400">({schedule?.label})</span>
+                    </>
+                  ) : (
+                    <span className="text-zinc-400">—</span>
+                  )}
                 </td>
                 <td className="px-3 py-2">{lastRun?.itemsProcessed ?? "—"}</td>
+                <td className="px-3 py-2">
+                  {runnable ? (
+                    <RunNowButton
+                      job={job}
+                      warn={
+                        job === "donor_outreach"
+                          ? "Run the weekly digest now? This sends a real email to the configured recipients."
+                          : undefined
+                      }
+                    />
+                  ) : null}
+                </td>
               </tr>
             ))}
           </tbody>

@@ -2,17 +2,17 @@ import { db } from "@/lib/db";
 import { briefings } from "@/lib/db/schema";
 import { getGmailClient } from "@/lib/gmail/client";
 import {
-  buildBriefingSubject,
-  renderProspectBriefingHtml,
-} from "@/lib/email/render-briefing";
-import type { AgentOutput } from "@/lib/llm/schema";
-import type { AgentTouchpoint } from "@/lib/llm/aggregate";
+  buildDigestSubject,
+  isActionable,
+  renderDigestHtml,
+  type DigestEntry,
+} from "@/lib/email/render-digest";
 
-export type SendBriefingInput = {
+export type SendDigestInput = {
   cronRunId: string | null;
-  fullName: string;
-  agentOutput: AgentOutput;
-  recentTouchpoints: AgentTouchpoint[];
+  entries: DigestEntry[];
+  alertThreshold: number;
+  runDate: string;
   recipients: string[];
   llmCostUsd: number;
   llmCallCount: number;
@@ -21,28 +21,43 @@ export type SendBriefingInput = {
 export type SendBriefingResult = {
   briefingId: string;
   status: "sent" | "failed";
+  alertCount: number;
   errorMessage?: string;
 };
 
-export async function sendProspectBriefing(
-  input: SendBriefingInput
+/**
+ * Send the single weekly digest email (one per run) and record one briefings
+ * row. Featured (actionable) prospects render with the full per-prospect layout
+ * + draft; the rest appear in a compact monitoring table.
+ */
+export async function sendWeeklyDigest(
+  input: SendDigestInput
 ): Promise<SendBriefingResult> {
-  const subject = buildBriefingSubject(
-    input.fullName,
-    input.agentOutput.potential_touchpoint.priority_score
-  );
-  const htmlBody = renderProspectBriefingHtml({
-    fullName: input.fullName,
-    agentOutput: input.agentOutput,
-    recentTouchpoints: input.recentTouchpoints,
+  const alertCount = input.entries.filter((e) =>
+    isActionable(e, input.alertThreshold)
+  ).length;
+  const subject = buildDigestSubject(input.runDate, alertCount);
+  const htmlBody = renderDigestHtml({
+    entries: input.entries,
+    alertThreshold: input.alertThreshold,
+    runDate: input.runDate,
     generatedAt: new Date(),
   });
 
+  const common = {
+    cronRunId: input.cronRunId,
+    recipients: input.recipients,
+    prospectCount: input.entries.length,
+    alertCount,
+    subject,
+    htmlBody,
+    llmCostUsd: input.llmCostUsd,
+    llmCallCount: input.llmCallCount,
+  };
+
   if (input.recipients.length === 0) {
     return persistBriefing({
-      ...input,
-      subject,
-      htmlBody,
+      ...common,
       status: "failed",
       errorMessage: "No briefing recipients configured (BRIEFING_RECIPIENTS).",
     });
@@ -55,17 +70,10 @@ export async function sendProspectBriefing(
       subject,
       htmlBody,
     });
-    return persistBriefing({
-      ...input,
-      subject,
-      htmlBody,
-      status: "sent",
-    });
+    return persistBriefing({ ...common, status: "sent" });
   } catch (err) {
     return persistBriefing({
-      ...input,
-      subject,
-      htmlBody,
+      ...common,
       status: "failed",
       errorMessage: err instanceof Error ? err.message : String(err),
     });
@@ -104,6 +112,8 @@ export async function recordEmptyBriefing(args: {
 async function persistBriefing(args: {
   cronRunId: string | null;
   recipients: string[];
+  prospectCount: number;
+  alertCount: number;
   subject: string;
   htmlBody: string;
   llmCostUsd: number;
@@ -116,8 +126,8 @@ async function persistBriefing(args: {
     .values({
       cronRunId: args.cronRunId,
       recipients: args.recipients,
-      prospectCount: 1,
-      alertCount: 1,
+      prospectCount: args.prospectCount,
+      alertCount: args.alertCount,
       htmlBody: args.htmlBody,
       subject: args.subject,
       llmCostUsd: args.llmCostUsd.toFixed(4),
@@ -129,6 +139,7 @@ async function persistBriefing(args: {
   return {
     briefingId: row.id,
     status: args.status,
+    alertCount: args.alertCount,
     errorMessage: args.errorMessage,
   };
 }

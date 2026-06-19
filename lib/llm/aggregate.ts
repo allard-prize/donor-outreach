@@ -41,8 +41,17 @@ export type AggregatedProspect = {
  * been archived.
  *
  * Returns one entry per prospect with at least one pending result.
+ *
+ * `opts.onlyProspectIds` scopes the run to specific prospects — used by the
+ * smoke test so it touches ONLY its fixture (the orchestrator otherwise pulls
+ * every pending prospect, which would clobber real data in a test).
  */
-export async function aggregatePendingByProspect(): Promise<AggregatedProspect[]> {
+export async function aggregatePendingByProspect(opts?: {
+  onlyProspectIds?: string[];
+}): Promise<AggregatedProspect[]> {
+  const onlyIds = opts?.onlyProspectIds;
+  if (onlyIds && onlyIds.length === 0) return [];
+
   const rows = await db
     .select({
       resultId: results.id,
@@ -61,7 +70,11 @@ export async function aggregatePendingByProspect(): Promise<AggregatedProspect[]
     .from(results)
     .innerJoin(prospects, eq(results.prospectId, prospects.id))
     .where(
-      and(eq(results.processedStatus, "pending"), isNull(prospects.archivedAt))
+      and(
+        eq(results.processedStatus, "pending"),
+        isNull(prospects.archivedAt),
+        ...(onlyIds ? [inArray(results.prospectId, onlyIds)] : [])
+      )
     )
     .orderBy(asc(results.prospectId), asc(results.pubDate));
 

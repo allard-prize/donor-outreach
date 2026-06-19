@@ -147,13 +147,6 @@ export const touchpointType = pgEnum("touchpoint_type", [
   "other",
 ]);
 
-export const touchpointReviewStatus = pgEnum("touchpoint_review_status", [
-  "pending",
-  "approved",
-  "rejected",
-  "promoted",
-]);
-
 export const briefingStatus = pgEnum("briefing_status", [
   "sent",
   "failed",
@@ -311,6 +304,14 @@ export const monitoringResults = pgTable(
     interpretation: text("interpretation").notNull().default(""),
     summary: text("summary").notNull().default(""),
     keyAlerts: jsonb("key_alerts").$type<unknown[]>().notNull().default([]),
+    // The agent's weekly recommendation, folded in here (Phase 2G dedup: the
+    // former touchpoints_potential table is dropped — the recommendation is one
+    // agent output per prospect per week, so it lives on the assessment row).
+    // Nullable so pre-existing monitoring rows stay valid.
+    touchpointType: touchpointType("touchpoint_type"),
+    priorityScore: integer("priority_score"),
+    engagementRationale: text("engagement_rationale").notNull().default(""),
+    draftContent: text("draft_content").notNull().default(""),
     briefingId: text("briefing_id").references(() => briefings.id, {
       onDelete: "set null",
     }),
@@ -319,43 +320,14 @@ export const monitoringResults = pgTable(
   (t) => ({
     prospectIdx: index("monitoring_result_prospect_idx").on(t.prospectId),
     runDateIdx: index("monitoring_result_run_date_idx").on(t.runDate),
+    priorityScoreIdx: index("monitoring_result_priority_score_idx").on(t.priorityScore),
   })
 );
 
-export const touchpointsPotential = pgTable(
-  "touchpoint_potential",
-  {
-    id: text("id").primaryKey(), // `${prospectId}_${runDateIso}` per spec
-    prospectId: text("prospect_id")
-      .notNull()
-      .references(() => prospects.id, { onDelete: "cascade" }),
-    runDate: date("run_date", { mode: "string" }).notNull(),
-    touchpointType: touchpointType("touchpoint_type").notNull(),
-    priorityScore: integer("priority_score").notNull(),
-    engagementRationale: text("engagement_rationale").notNull().default(""),
-    draftContent: text("draft_content").notNull().default(""),
-    reviewStatus: touchpointReviewStatus("review_status")
-      .notNull()
-      .default("pending"),
-    reviewedBy: text("reviewed_by"),
-    reviewedAt: timestamp("reviewed_at", { mode: "date" }),
-    promotedToAssignedId: text("promoted_to_assigned_id"),
-    briefingId: text("briefing_id").references(() => briefings.id, {
-      onDelete: "set null",
-    }),
-    createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
-  },
-  (t) => ({
-    prospectIdx: index("touchpoint_potential_prospect_idx").on(t.prospectId),
-    runDateIdx: index("touchpoint_potential_run_date_idx").on(t.runDate),
-    reviewStatusIdx: index("touchpoint_potential_review_status_idx").on(
-      t.reviewStatus
-    ),
-    priorityScoreIdx: index("touchpoint_potential_priority_score_idx").on(
-      t.priorityScore
-    ),
-  })
-);
+// touchpoints_potential was dropped in Phase 2G — Preet never used the Phase 1
+// "Potential" sheet (dormant since 2025) and the agent's recommendation now
+// lives on monitoring_results. Assigned touchpoints (her interaction log, an LLM
+// input) remain in touchpoints_assigned.
 
 // ---------- Phase 2E: eval-harness tables ----------
 //

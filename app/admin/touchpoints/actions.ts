@@ -1,10 +1,11 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { eq, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { auth } from "@/auth";
 import { db } from "@/lib/db";
-import { touchpointsPotential, touchpointsAssigned } from "@/lib/db/schema";
+import { touchpointsAssigned } from "@/lib/db/schema";
+import { touchpointTypeValues } from "@/lib/llm/schema";
 
 async function requireEmail(): Promise<string> {
   const session = await auth();
@@ -13,62 +14,62 @@ async function requireEmail(): Promise<string> {
   return email;
 }
 
-export async function approveTouchpoint(id: string) {
-  const email = await requireEmail();
-  await db
-    .update(touchpointsPotential)
-    .set({ reviewStatus: "approved", reviewedBy: email, reviewedAt: sql`now()` })
-    .where(eq(touchpointsPotential.id, id));
-  revalidatePath("/admin/touchpoints");
-}
+// Assigned touchpoints are Preet's log of completed interactions — an INPUT fed
+// to the agent. These actions let her maintain that log from the dashboard.
+// (The Phase 1 "Potential" review queue was dropped in Phase 2G.)
 
-export async function rejectTouchpoint(id: string) {
-  const email = await requireEmail();
-  await db
-    .update(touchpointsPotential)
-    .set({ reviewStatus: "rejected", reviewedBy: email, reviewedAt: sql`now()` })
-    .where(eq(touchpointsPotential.id, id));
-  revalidatePath("/admin/touchpoints");
-}
+type AssignedType = (typeof touchpointTypeValues)[number];
 
-/**
- * Promote an approved touchpoint to touchpointsAssigned once the human has
- * actually made the move. Records the historic row and links it back.
- */
-export async function promoteTouchpoint(id: string, formData: FormData) {
-  await requireEmail();
-  const [tp] = await db
-    .select()
-    .from(touchpointsPotential)
-    .where(eq(touchpointsPotential.id, id));
-  if (!tp) throw new Error("Touchpoint not found");
-  if (tp.reviewStatus !== "approved")
-    throw new Error("Only approved touchpoints can be promoted");
-
+function parseForm(formData: FormData): {
+  prospectId: string;
+  touchpointType: AssignedType;
+  completedDate: string;
+  summary: string;
+  response: string | null;
+  nextStep: string | null;
+} {
+  const prospectId = String(formData.get("prospectId") ?? "").trim();
+  const touchpointType = String(formData.get("touchpointType") ?? "").trim();
   const completedDate = String(formData.get("completedDate") ?? "").trim();
   const summary = String(formData.get("summary") ?? "").trim();
   const response = String(formData.get("response") ?? "").trim() || null;
   const nextStep = String(formData.get("nextStep") ?? "").trim() || null;
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(completedDate))
+
+  if (!prospectId) throw new Error("prospect is required");
+  if (!touchpointTypeValues.includes(touchpointType as AssignedType)) {
+    throw new Error(`invalid touchpoint type: ${touchpointType}`);
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(completedDate)) {
     throw new Error("completedDate must be YYYY-MM-DD");
+  }
   if (!summary) throw new Error("summary is required");
 
-  const [assigned] = await db
-    .insert(touchpointsAssigned)
-    .values({
-      prospectId: tp.prospectId,
-      touchpointType: tp.touchpointType,
-      completedDate,
-      summary,
-      response,
-      nextStep,
-    })
-    .returning({ id: touchpointsAssigned.id });
+  return {
+    prospectId,
+    touchpointType: touchpointType as AssignedType,
+    completedDate,
+    summary,
+    response,
+    nextStep,
+  };
+}
 
-  await db
-    .update(touchpointsPotential)
-    .set({ reviewStatus: "promoted", promotedToAssignedId: assigned.id })
-    .where(eq(touchpointsPotential.id, id));
+export async function upsertAssignedTouchpoint(formData: FormData) {
+  await requireEmail();
+  const id = String(formData.get("id") ?? "").trim();
+  const values = parseForm(formData);
 
+  if (id) {
+    await db.update(touchpointsAssigned).set(values).where(eq(touchpointsAssigned.id, id));
+  } else {
+    await db.insert(touchpointsAssigned).values(values);
+  }
+  revalidatePath("/admin/touchpoints");
+}
+
+export async function deleteAssignedTouchpoint(id: string) {
+  await requireEmail();
+  if (!id) throw new Error("id is required");
+  await db.delete(touchpointsAssigned).where(eq(touchpointsAssigned.id, id));
   revalidatePath("/admin/touchpoints");
 }

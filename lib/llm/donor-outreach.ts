@@ -1,10 +1,6 @@
-import { inArray } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
-import {
-  monitoringResults,
-  results as resultsTable,
-  touchpointsPotential,
-} from "@/lib/db/schema";
+import { monitoringResults, results as resultsTable } from "@/lib/db/schema";
 import {
   aggregatePendingByProspect,
   toAgentResultShape,
@@ -16,8 +12,9 @@ import { stageToDbEnum, type AgentOutput } from "@/lib/llm/schema";
 import {
   parseRecipientsEnv,
   recordEmptyBriefing,
-  sendProspectBriefing,
+  sendWeeklyDigest,
 } from "@/lib/email/send-briefing";
+import type { DigestEntry } from "@/lib/email/render-digest";
 
 export type DonorOutreachSummary = {
   prospectsAggregated: number;
@@ -50,6 +47,12 @@ export type DonorOutreachOptions = {
    * Inject a fake dossier reader for fixtures.
    */
   dossierFn?: typeof getDossierText;
+  /**
+   * Scope the run to specific prospects. The smoke test sets this to its
+   * fixture id so it never touches real prospects (the orchestrator otherwise
+   * processes every pending prospect).
+   */
+  onlyProspectIds?: string[];
 };
 
 export async function runDonorOutreach(
@@ -61,7 +64,9 @@ export async function runDonorOutreach(
   const recipients = parseRecipientsEnv();
   const runDate = today();
 
-  const aggregated = await aggregatePendingByProspect();
+  const aggregated = await aggregatePendingByProspect({
+    onlyProspectIds: options.onlyProspectIds,
+  });
   const summary: DonorOutreachSummary = {
     prospectsAggregated: aggregated.length,
     prospectsScored: 0,
@@ -85,13 +90,13 @@ export async function runDonorOutreach(
     return summary;
   }
 
+  // Score every prospect (persisting each weekly assessment), then send ONE
+  // weekly digest covering them all — replaces the Phase 1 per-prospect emails.
+  const entries: DigestEntry[] = [];
   for (const prospect of aggregated) {
     const outcome = await scoreProspect({
       prospect,
       runDate,
-      cronRunId: options.cronRunId,
-      recipients,
-      alertThreshold,
       agentFn,
       dossierFn,
     });
@@ -100,8 +105,11 @@ export async function runDonorOutreach(
     if (outcome.kind === "scored") {
       summary.prospectsScored += 1;
       summary.resultsProcessed += outcome.resultIds.length;
-      if (outcome.briefingSent === true) summary.briefingsSent += 1;
-      if (outcome.briefingSent === false) summary.briefingsFailed += 1;
+      entries.push({
+        fullName: prospect.fullName,
+        agentOutput: outcome.agentOutput,
+        recentTouchpoints: prospect.touchpoints,
+      });
     } else {
       summary.prospectsFailed += 1;
       summary.failures.push({
@@ -113,15 +121,36 @@ export async function runDonorOutreach(
     }
   }
 
-  if (summary.briefingsSent === 0 && summary.briefingsFailed === 0) {
+  if (entries.length === 0) {
+    // Every prospect failed — record a sentinel so an absent Tuesday row still
+    // signals broken cron rather than a quiet week.
     await recordEmptyBriefing({
       cronRunId: options.cronRunId,
       recipients,
-      prospectCount: summary.prospectsScored,
+      prospectCount: 0,
       llmCostUsd: summary.llmCostUsd,
       llmCallCount: summary.llmCallCount,
     });
+    return summary;
   }
+
+  const digest = await sendWeeklyDigest({
+    cronRunId: options.cronRunId,
+    entries,
+    alertThreshold,
+    runDate,
+    recipients,
+    llmCostUsd: summary.llmCostUsd,
+    llmCallCount: summary.llmCallCount,
+  });
+  summary.briefingsSent = digest.status === "sent" ? 1 : 0;
+  summary.briefingsFailed = digest.status === "sent" ? 0 : 1;
+
+  // Link this run's assessments to the digest briefing they were reported in.
+  await db
+    .update(monitoringResults)
+    .set({ briefingId: digest.briefingId })
+    .where(eq(monitoringResults.runDate, runDate));
 
   return summary;
 }
@@ -130,7 +159,7 @@ type ProspectOutcome =
   | {
       kind: "scored";
       resultIds: string[];
-      briefingSent: boolean | null; // null = no email (below threshold)
+      agentOutput: AgentOutput;
       llmCostUsd: number;
       llmCallCount: number;
     }
@@ -145,9 +174,6 @@ type ProspectOutcome =
 async function scoreProspect(args: {
   prospect: AggregatedProspect;
   runDate: string;
-  cronRunId: string | null;
-  recipients: string[];
-  alertThreshold: number;
   agentFn: NonNullable<DonorOutreachOptions["agentFn"]>;
   dossierFn: NonNullable<DonorOutreachOptions["dossierFn"]>;
 }): Promise<ProspectOutcome> {
@@ -188,29 +214,11 @@ async function scoreProspect(args: {
     };
   }
 
-  let briefingSent: boolean | null = null;
-  let briefingId: string | null = null;
-  const score = call.output.potential_touchpoint.priority_score;
-  if (score >= args.alertThreshold) {
-    const briefing = await sendProspectBriefing({
-      cronRunId: args.cronRunId,
-      fullName: args.prospect.fullName,
-      agentOutput: call.output,
-      recentTouchpoints: args.prospect.touchpoints,
-      recipients: args.recipients,
-      llmCostUsd,
-      llmCallCount,
-    });
-    briefingId = briefing.briefingId;
-    briefingSent = briefing.status === "sent";
-  }
-
   try {
     await persistAgentOutcome({
       prospectId: args.prospect.prospectId,
       runDate: args.runDate,
       agentOutput: call.output,
-      briefingId,
       resultIds: args.prospect.resultIds,
     });
   } catch (err) {
@@ -226,7 +234,7 @@ async function scoreProspect(args: {
   return {
     kind: "scored",
     resultIds: args.prospect.resultIds,
-    briefingSent,
+    agentOutput: call.output,
     llmCostUsd,
     llmCallCount,
   };
@@ -236,63 +244,33 @@ async function persistAgentOutcome(args: {
   prospectId: string;
   runDate: string;
   agentOutput: AgentOutput;
-  briefingId: string | null;
   resultIds: string[];
 }): Promise<void> {
-  const { agentOutput, prospectId, runDate, briefingId, resultIds } = args;
+  const { agentOutput, prospectId, runDate, resultIds } = args;
   const id = `${prospectId}_${runDate}`;
+  const rs = agentOutput.relationship_state;
+  const tp = agentOutput.potential_touchpoint;
+
+  // One assessment row per prospect per week, carrying both the relationship
+  // read and the agent's recommendation (the briefingId is linked after the
+  // weekly digest is sent). Idempotent on re-run of the same week.
+  const fields = {
+    stage: stageToDbEnum(rs.stage),
+    responsiveness: rs.responsiveness,
+    momentum: rs.momentum,
+    interpretation: rs.interpretation,
+    summary: agentOutput.monitoring_results.summary,
+    keyAlerts: agentOutput.monitoring_results.key_alerts,
+    touchpointType: tp.touchpoint_type,
+    priorityScore: tp.priority_score,
+    engagementRationale: tp.engagement_rationale,
+    draftContent: tp.draft_content,
+  } as const;
 
   await db
     .insert(monitoringResults)
-    .values({
-      id,
-      prospectId,
-      runDate,
-      stage: stageToDbEnum(agentOutput.relationship_state.stage),
-      responsiveness: agentOutput.relationship_state.responsiveness,
-      momentum: agentOutput.relationship_state.momentum,
-      interpretation: agentOutput.relationship_state.interpretation,
-      summary: agentOutput.monitoring_results.summary,
-      keyAlerts: agentOutput.monitoring_results.key_alerts,
-      briefingId,
-    })
-    .onConflictDoUpdate({
-      target: monitoringResults.id,
-      set: {
-        stage: stageToDbEnum(agentOutput.relationship_state.stage),
-        responsiveness: agentOutput.relationship_state.responsiveness,
-        momentum: agentOutput.relationship_state.momentum,
-        interpretation: agentOutput.relationship_state.interpretation,
-        summary: agentOutput.monitoring_results.summary,
-        keyAlerts: agentOutput.monitoring_results.key_alerts,
-        briefingId,
-      },
-    });
-
-  if (agentOutput.potential_touchpoint.touchpoint_type !== "no_action") {
-    await db
-      .insert(touchpointsPotential)
-      .values({
-        id,
-        prospectId,
-        runDate,
-        touchpointType: agentOutput.potential_touchpoint.touchpoint_type,
-        priorityScore: agentOutput.potential_touchpoint.priority_score,
-        engagementRationale: agentOutput.potential_touchpoint.engagement_rationale,
-        draftContent: agentOutput.potential_touchpoint.draft_content,
-        briefingId,
-      })
-      .onConflictDoUpdate({
-        target: touchpointsPotential.id,
-        set: {
-          touchpointType: agentOutput.potential_touchpoint.touchpoint_type,
-          priorityScore: agentOutput.potential_touchpoint.priority_score,
-          engagementRationale: agentOutput.potential_touchpoint.engagement_rationale,
-          draftContent: agentOutput.potential_touchpoint.draft_content,
-          briefingId,
-        },
-      });
-  }
+    .values({ id, prospectId, runDate, ...fields })
+    .onConflictDoUpdate({ target: monitoringResults.id, set: { ...fields } });
 
   if (resultIds.length > 0) {
     await db

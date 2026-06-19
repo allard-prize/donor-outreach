@@ -17,7 +17,6 @@ import {
   monitoringResults,
   prospects,
   results,
-  touchpointsPotential,
 } from "@/lib/db/schema";
 import {
   runDonorOutreach,
@@ -119,9 +118,6 @@ async function seedFixture(prospectId: string): Promise<{ resultIds: string[] }>
 
 async function teardownFixture(prospectId: string, resultIds: string[]): Promise<void> {
   await db.delete(monitoringResults).where(eq(monitoringResults.prospectId, prospectId));
-  await db
-    .delete(touchpointsPotential)
-    .where(eq(touchpointsPotential.prospectId, prospectId));
   await db.delete(results).where(inArray(results.id, resultIds));
   await db.delete(prospects).where(eq(prospects.id, prospectId));
 }
@@ -134,16 +130,15 @@ async function assertPersistedRows(prospectId: string): Promise<void> {
   if (monRows.length !== 1) {
     throw new Error(`expected 1 monitoring_result row, got ${monRows.length}`);
   }
-  const tpRows = await db
-    .select()
-    .from(touchpointsPotential)
-    .where(eq(touchpointsPotential.prospectId, prospectId));
-  if (tpRows.length !== 1) {
-    throw new Error(`expected 1 touchpoint_potential row, got ${tpRows.length}`);
-  }
-  if (tpRows[0].priorityScore !== 9) {
+  // The recommendation now lives on the assessment row (Phase 2G dedup).
+  if (monRows[0].priorityScore !== 9) {
     throw new Error(
-      `touchpoint_potential.priority_score expected 9, got ${tpRows[0].priorityScore}`
+      `monitoring_result.priority_score expected 9, got ${monRows[0].priorityScore}`
+    );
+  }
+  if (monRows[0].touchpointType !== "congratulations") {
+    throw new Error(
+      `monitoring_result.touchpoint_type expected congratulations, got ${monRows[0].touchpointType}`
     );
   }
 }
@@ -161,6 +156,9 @@ async function main(): Promise<void> {
       cronRunId: null,
       agentFn: stubbedAgent(),
       dossierFn: stubbedDossier(),
+      // CRITICAL: scope to the fixture only — runDonorOutreach otherwise
+      // processes every pending prospect and would clobber real data.
+      onlyProspectIds: [prospectId],
     });
     console.log("[smoke] orchestrator summary:", JSON.stringify(summary, null, 2));
 

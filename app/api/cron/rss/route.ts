@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
-import { captureRss } from "@/lib/sources/rss";
-import { recordRunStart, recordRunFinish } from "@/lib/cron-runs/recorder";
+import { runJob } from "@/lib/cron-runs/run-job";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -10,35 +9,14 @@ export async function GET(request: Request) {
   if (!isAuthorized(request)) {
     return new NextResponse("Unauthorized", { status: 401 });
   }
-
   const startedAt = Date.now();
-  const run = await recordRunStart("rss");
-  try {
-    const summary = await captureRss();
-    const outcome = summary.feedsFailed > 0 ? "partial" : "success";
-    await recordRunFinish(run.id, outcome, {
-      itemsProcessed: summary.itemsInserted,
-      metadata: { ...summary },
-    });
-    return NextResponse.json({
-      ok: true,
-      durationMs: Date.now() - startedAt,
-      cronRunId: run.id,
-      ...summary,
-    });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    await recordRunFinish(run.id, "failure", { errorMessage: message });
-    return NextResponse.json(
-      {
-        ok: false,
-        durationMs: Date.now() - startedAt,
-        cronRunId: run.id,
-        error: message,
-      },
-      { status: 500 }
-    );
-  }
+  const r = await runJob("rss");
+  return NextResponse.json(
+    r.ok
+      ? { ok: true, durationMs: Date.now() - startedAt, cronRunId: r.cronRunId, ...r.summary }
+      : { ok: false, durationMs: Date.now() - startedAt, cronRunId: r.cronRunId, error: r.error },
+    { status: r.ok ? 200 : 500 }
+  );
 }
 
 function isAuthorized(request: Request): boolean {

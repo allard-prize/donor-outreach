@@ -7,8 +7,8 @@ import { RunNowButton } from "./run-now-button";
 const CRON_SCHEDULES: Record<string, { expr: string; label: string } | null> = {
   rss: { expr: "0 6 * * *", label: "daily 06:00" },
   email_capture: { expr: "30 6 * * *", label: "daily 06:30" },
-  linkedin_scrape: { expr: "0 23 * * 1", label: "Mon 23:00" },
-  donor_outreach: { expr: "0 9 * * 2", label: "Tue 09:00" },
+  linkedin_scrape: { expr: "0 0 * * 1", label: "Sun night (Mon 00:00 UTC)" },
+  donor_outreach: { expr: "0 2 * * 1", label: "Sun night (Mon 02:00 UTC)" },
   health_check: null,
 };
 

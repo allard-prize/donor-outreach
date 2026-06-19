@@ -69,8 +69,8 @@ app/
     cron/
       rss/route.ts             # daily 06:00 UTC — port of update-rss-results.json (Phase 2B)
       email-capture/route.ts   # daily 06:30 UTC — port of capture-ap-emails.json (Phase 2B)
-      linkedin-scrape/route.ts # Mondays 23:00 UTC — port of capture-linkedin-posts.json (Phase 2B)
-      donor-outreach/route.ts  # Tuesdays 09:00 UTC — port of ap-donor-outreach.json (Phase 2C)
+      linkedin-scrape/route.ts # weekly Mon 00:00 UTC (Sun night ET) — port of capture-linkedin-posts.json (Phase 2B)
+      donor-outreach/route.ts  # weekly Mon 02:00 UTC (Sun night ET) — port of ap-donor-outreach.json (Phase 2C)
       # health-check/ — TBD (Phase 2C/2D)
 lib/
   db/

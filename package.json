@@ -23,6 +23,7 @@
     "@auth/drizzle-adapter": "^1.11.2",
     "@neondatabase/serverless": "^1.1.0",
     "@paralleldrive/cuid2": "^3.3.0",
+    "docx": "^9.7.1",
     "drizzle-orm": "^0.45.2",
     "googleapis": "^172.0.0",
     "mammoth": "^1.12.0",

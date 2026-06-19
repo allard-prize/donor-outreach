@@ -4,8 +4,7 @@ import { revalidatePath } from "next/cache";
 import { eq } from "drizzle-orm";
 import { auth } from "@/auth";
 import { db } from "@/lib/db";
-import { touchpointsAssigned } from "@/lib/db/schema";
-import { touchpointTypeValues } from "@/lib/llm/schema";
+import { touchpointsAssigned, touchpointType } from "@/lib/db/schema";
 
 async function requireEmail(): Promise<string> {
   const session = await auth();
@@ -18,7 +17,11 @@ async function requireEmail(): Promise<string> {
 // to the agent. These actions let her maintain that log from the dashboard.
 // (The Phase 1 "Potential" review queue was dropped in Phase 2G.)
 
-type AssignedType = (typeof touchpointTypeValues)[number];
+// Authoritative list of allowed types is the DB enum (includes "other", used by
+// imported rows). A "use server" file may only export async functions, so the
+// picker's option list lives in touchpoint-form.tsx; here we just validate.
+const touchpointTypeEnum = touchpointType.enumValues;
+type AssignedType = (typeof touchpointTypeEnum)[number];
 
 function parseForm(formData: FormData): {
   prospectId: string;
@@ -36,7 +39,7 @@ function parseForm(formData: FormData): {
   const nextStep = String(formData.get("nextStep") ?? "").trim() || null;
 
   if (!prospectId) throw new Error("prospect is required");
-  if (!touchpointTypeValues.includes(touchpointType as AssignedType)) {
+  if (!touchpointType.length || !touchpointTypeEnum.includes(touchpointType as AssignedType)) {
     throw new Error(`invalid touchpoint type: ${touchpointType}`);
   }
   if (!/^\d{4}-\d{2}-\d{2}$/.test(completedDate)) {

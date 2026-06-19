@@ -7,7 +7,32 @@ import {
   type AggregatedProspect,
 } from "@/lib/llm/aggregate";
 import { getDossierText } from "@/lib/dossiers";
+import { getStoredGraphToken } from "@/lib/msgraph/token-store";
 import { runAgent, type AgentCallResult } from "@/lib/llm/agent";
+
+// Process prospects with bounded concurrency so the weekly run finishes inside
+// Vercel's 60s maxDuration (Hobby). Sequential ~15-20s/prospect agent calls blow
+// past 60s after ~2-3 prospects; a pool of 8 fits ~24 prospects comfortably.
+const PROSPECT_CONCURRENCY = 8;
+
+async function mapPool<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T, index: number) => Promise<R>
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  async function worker() {
+    while (next < items.length) {
+      const i = next++;
+      results[i] = await fn(items[i], i);
+    }
+  }
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, () => worker())
+  );
+  return results;
+}
 import { stageToDbEnum, type AgentOutput } from "@/lib/llm/schema";
 import {
   parseRecipientsEnv,
@@ -90,16 +115,32 @@ export async function runDonorOutreach(
     return summary;
   }
 
-  // Score every prospect (persisting each weekly assessment), then send ONE
-  // weekly digest covering them all — replaces the Phase 1 per-prospect emails.
+  // Pre-acquire the SharePoint Graph token ONCE (it rotates the refresh token on
+  // redemption — concurrent first-time acquisitions would race and invalidate
+  // each other). Subsequent per-prospect reads reuse this token.
+  let graphAccessToken: string | undefined;
+  const needsGraph = aggregated.some(
+    (p) => p.dossierProvider === "onedrive" && p.dossierFileId
+  );
+  if (needsGraph) {
+    try {
+      graphAccessToken = await getStoredGraphToken();
+    } catch {
+      // Leave undefined — per-prospect dossier reads will surface the error and
+      // mark those prospects failed (partial run) rather than aborting.
+    }
+  }
+
+  // Score prospects with bounded concurrency, persisting each assessment, then
+  // send ONE weekly digest covering them all (replaces per-prospect emails).
+  const outcomes = await mapPool(aggregated, PROSPECT_CONCURRENCY, (prospect) =>
+    scoreProspect({ prospect, runDate, agentFn, dossierFn, graphAccessToken })
+  );
+
   const entries: DigestEntry[] = [];
-  for (const prospect of aggregated) {
-    const outcome = await scoreProspect({
-      prospect,
-      runDate,
-      agentFn,
-      dossierFn,
-    });
+  for (let i = 0; i < aggregated.length; i += 1) {
+    const prospect = aggregated[i];
+    const outcome = outcomes[i];
     summary.llmCostUsd += outcome.llmCostUsd;
     summary.llmCallCount += outcome.llmCallCount;
     if (outcome.kind === "scored") {
@@ -176,12 +217,14 @@ async function scoreProspect(args: {
   runDate: string;
   agentFn: NonNullable<DonorOutreachOptions["agentFn"]>;
   dossierFn: NonNullable<DonorOutreachOptions["dossierFn"]>;
+  graphAccessToken?: string;
 }): Promise<ProspectOutcome> {
   let context = "";
   try {
     context = await args.dossierFn({
       provider: args.prospect.dossierProvider,
       fileId: args.prospect.dossierFileId,
+      graphAccessToken: args.graphAccessToken,
     });
   } catch (err) {
     return {

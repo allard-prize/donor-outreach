@@ -22,6 +22,9 @@ The repo is owned by `allard-prize-alerts` on GitHub and may be public at any ti
 
 **No external Google dependency by design**: per Brian, the productionalized system holds all editable data in Postgres (UI-editable) and document files in Microsoft SharePoint/OneDrive (Phase 2G). No Google Sheet/Doc is a runtime dependency — eval cases live in the `eval_case` table, not the Phase 1 Eval sheet.
 
+**"OneDrive" / "SharePoint" always means one folder.** When Brian asks to read or write files to/from OneDrive or SharePoint, he means the **`AP - Donor Outreach System`** folder (or a subdirectory under it):
+`https://allardprize2.sharepoint.com/sites/allardprize.org` → `Shared Documents/Shared Externally/AP - Donor Outreach System` (tenant `16a4d471-56c0-44eb-9d70-5ba79b2c1eb8`). Per-prospect dossiers live in its `Context/` subfolder. Access via the Graph helpers in `lib/msgraph/` (shares-API resolution + the Postgres token store). Never assume any other SharePoint site or library.
+
 ---
 
 ## Tech Stack

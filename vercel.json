@@ -12,11 +12,11 @@
     },
     {
       "path": "/api/cron/linkedin-scrape",
-      "schedule": "0 23 * * 1"
+      "schedule": "0 0 * * 1"
     },
     {
       "path": "/api/cron/donor-outreach",
-      "schedule": "0 9 * * 2"
+      "schedule": "0 2 * * 1"
     }
   ]
 }

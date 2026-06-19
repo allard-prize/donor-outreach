@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, sql } from "drizzle-orm";
+import { and, desc, gte, inArray, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { briefings, cronRuns, cronJobName, evalRuns } from "@/lib/db/schema";
 import { RunNowButton } from "./run-now-button";
@@ -34,6 +34,19 @@ function fmtUtc(d: Date): string {
   return d.toISOString().replace("T", " ").slice(0, 16) + " UTC";
 }
 
+// Group a cron_run's per-item failures (metadata.failures = [{stage, error, ...}])
+// into "stage: error → count" so a partial run's reason is visible at a glance.
+function failureReasons(metadata: unknown): { reason: string; count: number }[] {
+  const fs = (metadata as { failures?: { stage?: string; error?: string }[] } | null)?.failures;
+  if (!Array.isArray(fs) || fs.length === 0) return [];
+  const by = new Map<string, number>();
+  for (const f of fs) {
+    const key = `${f.stage ?? "?"}: ${f.error ?? "?"}`;
+    by.set(key, (by.get(key) ?? 0) + 1);
+  }
+  return [...by].map(([reason, count]) => ({ reason, count }));
+}
+
 // "Run now" on donor_outreach runs the full weekly digest inline — give the
 // page's server actions the same 60s budget as the cron routes.
 export const maxDuration = 60;
@@ -58,7 +71,7 @@ export default async function HealthPage() {
       .from(cronRuns)
       .where(
         and(
-          eq(cronRuns.status, "failure"),
+          inArray(cronRuns.status, ["failure", "partial"]),
           gte(cronRuns.startedAt, sql`now() - interval '7 days'`)
         )
       )
@@ -232,23 +245,46 @@ export default async function HealthPage() {
 
       {recentFailures.length > 0 && (
         <>
-          <h2 className="mt-8 text-sm font-semibold text-red-700">Failures (past 7 days)</h2>
-          <div className="mt-2 overflow-hidden rounded-lg border border-red-200 bg-white">
-            <table className="w-full text-sm">
-              <tbody>
-                {recentFailures.map((r) => (
-                  <tr key={r.id} className="border-t border-red-100">
-                    <td className="px-3 py-2 font-mono text-xs">{r.jobName}</td>
-                    <td className="px-3 py-2 whitespace-nowrap text-zinc-500">
-                      {r.startedAt.toISOString().replace("T", " ").slice(0, 16)} UTC
-                    </td>
-                    <td className="max-w-md px-3 py-2 text-xs text-red-700">
-                      <span className="line-clamp-2">{r.errorMessage ?? "(no message)"}</span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <h2 className="mt-8 text-sm font-semibold text-red-700">
+            Failures &amp; partial runs (past 7 days)
+          </h2>
+          <p className="mt-1 text-xs text-zinc-500">
+            A <strong>partial</strong> run finished but some items failed (e.g. a few prospects).
+            The breakdown below is each run&apos;s per-item failure reasons.
+          </p>
+          <div className="mt-2 space-y-2">
+            {recentFailures.map((r) => {
+              const reasons = failureReasons(r.metadata);
+              return (
+                <div key={r.id} className="rounded-lg border border-red-200 bg-white p-3">
+                  <div className="flex flex-wrap items-center gap-2 text-sm">
+                    <span className="font-mono text-xs">{r.jobName}</span>
+                    <span
+                      className={
+                        r.status === "failure"
+                          ? "rounded bg-red-50 px-2 py-0.5 text-xs text-red-700"
+                          : "rounded bg-amber-50 px-2 py-0.5 text-xs text-amber-700"
+                      }
+                    >
+                      {r.status}
+                    </span>
+                    <span className="text-xs text-zinc-500">{fmtUtc(r.startedAt)}</span>
+                  </div>
+                  {r.errorMessage && (
+                    <p className="mt-1 text-xs text-red-700">{r.errorMessage}</p>
+                  )}
+                  {reasons.length > 0 && (
+                    <ul className="mt-1 space-y-0.5 text-xs text-zinc-600">
+                      {reasons.map((x) => (
+                        <li key={x.reason}>
+                          <span className="font-medium">×{x.count}</span> {x.reason}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </>
       )}

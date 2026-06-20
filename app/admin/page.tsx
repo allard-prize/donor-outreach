@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { db } from "@/lib/db";
-import { prospects, sources, results, cronRuns } from "@/lib/db/schema";
-import { isNull, eq, count, desc, and } from "drizzle-orm";
+import { prospects, sources, results, cronRuns, monitoringResults } from "@/lib/db/schema";
+import { isNull, eq, ne, count, desc, and, isNotNull } from "drizzle-orm";
 
 export default async function AdminHomePage() {
   const [[activeProspects], [activeSources], [pendingResults], lastRuns] =
@@ -28,17 +28,42 @@ export default async function AdminHomePage() {
     .from(prospects)
     .where(and(isNull(prospects.archivedAt), eq(prospects.profileType, "unknown")));
 
+  // Count assessments from the most recent weekly run that recommend a followup
+  // action — i.e. the agent gave an actionable touchpoint (not no_action). Mirrors
+  // the `actionable` rule used by the assessment cards.
+  const [latestAssessmentWeek] = await db
+    .select({ runDate: monitoringResults.runDate })
+    .from(monitoringResults)
+    .orderBy(desc(monitoringResults.runDate))
+    .limit(1);
+
+  const followupActions = latestAssessmentWeek
+    ? (
+        await db
+          .select({ value: count() })
+          .from(monitoringResults)
+          .where(
+            and(
+              eq(monitoringResults.runDate, latestAssessmentWeek.runDate),
+              isNotNull(monitoringResults.touchpointType),
+              ne(monitoringResults.touchpointType, "no_action"),
+            ),
+          )
+      )[0].value
+    : 0;
+
   const cards = [
     { label: "Active prospects", value: activeProspects.value, href: "/admin/prospects" },
     { label: "Active RSS sources", value: activeSources.value, href: "/admin/sources" },
     { label: "Pending signals", value: pendingResults.value, href: null },
+    { label: "Followup actions recommended", value: followupActions, href: "/admin/assessments" },
   ];
 
   return (
     <main>
       <h1 className="text-xl font-semibold">Dashboard</h1>
 
-      <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
+      <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {cards.map((c) => (
           <div key={c.label} className="rounded-lg border border-zinc-200 bg-white p-4">
             <p className="text-sm text-zinc-500">{c.label}</p>

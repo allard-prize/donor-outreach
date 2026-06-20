@@ -10,6 +10,7 @@ const NAV = [
   { href: "/admin/touchpoints", label: "Touchpoints" },
   { href: "/admin/briefings", label: "Briefings" },
   { href: "/admin/health", label: "Health" },
+  { href: "/admin/maintenance", label: "Make a change" },
 ];
 
 export default async function AdminLayout({

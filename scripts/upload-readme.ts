@@ -86,11 +86,16 @@ function buildDoc(): Document {
             "1. Read the weekly digest email. 2. For any featured prospect, use or adapt the suggested draft to reach out. 3. Open Assessments (or the prospect's page) if you want the full detail behind a recommendation. 4. After you act, log what you did under Touchpoints — that keeps the AI's future recommendations accurate."
           ),
 
+          h2("Changing the system"),
+          p(
+            "Beyond the day-to-day above, you can change how the system itself works — the wording of the digest, the dashboard, thresholds, and more — just by talking to ChatGPT. No code, no developer. See \"Making Changes - Maintenance Guide\" in this folder, or use the \"Make a change\" page on the dashboard."
+          ),
+
           h2("Where things live"),
-          bullet("Dashboard", "Prospects, Sources, Results, Assessments, Touchpoints, Briefings, and system Health."),
+          bullet("Dashboard", "Prospects, Sources, Results, Assessments, Touchpoints, Briefings, system Health, and the \"Make a change\" page."),
           bullet(
             "This OneDrive folder",
-            "Prospect dossiers (in the Context subfolder) and this README. Everything else — the data you edit — lives in the dashboard."
+            "Prospect dossiers (in the Context subfolder), this README, and the \"Making Changes\" maintenance guide. Everything else — the data you edit — lives in the dashboard."
           ),
         ],
       },

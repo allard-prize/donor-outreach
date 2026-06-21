@@ -6,7 +6,6 @@
 // side of the same loop.
 
 const CODEX_URL = "https://chatgpt.com/codex";
-const PRS_URL = "https://github.com/allard-prize/donor-outreach/pulls";
 const SHAREPOINT_FOLDER =
   "https://allardprize2.sharepoint.com/:f:/r/sites/allardprize.org/Shared%20Documents/Shared%20Externally/AP%20-%20Donor%20Outreach%20System?csf=1&web=1&e=wz8n2w";
 const README_URL =
@@ -16,17 +15,17 @@ const STEPS = [
   {
     n: 1,
     title: "Ask for the change",
-    body: "Open your assistant and describe the change in plain English — for example, “Add the priority score to the briefing email.” It reads the system's instructions, makes the change, and opens a Pull Request (a proposed change waiting for your OK).",
+    body: "Open ChatGPT and describe what you want in plain English — for example, “Add the priority score to the briefing email.” It makes the change and sends you back a link to preview it.",
   },
   {
     n: 2,
-    title: "Review the preview",
-    body: "Within a minute or two a comment appears on the Pull Request with a preview link. Open it — it's a private copy of the live site with your change applied. Check that it looks right. Nothing is live yet.",
+    title: "Look at the preview",
+    body: "Open the link it gives you — it's a private copy of the site with your change applied. Check that it looks right. Nothing is live yet.",
   },
   {
     n: 3,
-    title: "Approve or adjust",
-    body: "Happy with the preview? Click Merge on the Pull Request — the live system updates automatically. Not quite right? Reply on the Pull Request with what to fix and the assistant revises it.",
+    title: "Publish (or adjust)",
+    body: "Happy with it? Reply “publish it” and ChatGPT makes it live for you. Not quite right? Tell it what to change. Changed your mind later? Just say “undo that.”",
   },
 ];
 
@@ -95,9 +94,8 @@ export default function MaintenancePage() {
           rel="noopener noreferrer"
           className="rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
         >
-          Ask for a change → open ChatGPT Codex
+          Open ChatGPT to make a change
         </a>
-        <ExternalLink href={PRS_URL}>Your pending changes (Pull Requests) →</ExternalLink>
       </div>
 
       <div className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-2">

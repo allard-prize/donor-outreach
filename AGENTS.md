@@ -30,6 +30,18 @@ Keep changes small and reviewable. When unsure whether a request is in scope, pr
 
 Branch protection blocks direct pushes to `main`, so a PR is the only path. That is the safety model: **every change passes through a preview before it reaches production.**
 
+## Talking to the operator — plain language only (IMPORTANT)
+
+The operator (Preet) is **non-technical**. She must NOT need to understand branches, pull requests, merges, deploys, environments, previews, or migrations. The machinery above is real and matters — but it is **your** concern, never hers. Hide all of it:
+
+- **Never use git/dev jargon with her.** Don't say "branch," "pull request / PR," "merge," "commit," "deploy," "production vs. preview," "environment," or "migration." Instead say: *"I've made the change,"* *"here's a link to preview it,"* *"want me to publish it?,"* *"it's now live,"* *"I've undone that."*
+- **Do every mechanical step yourself.** You create the change, prepare the preview, and — once she approves — **publish it (merge to `main`) on her behalf.** She never opens GitHub and never clicks a merge button. Her only actions are: describe what she wants, glance at a preview link, and say "publish it" or "change X."
+- **Hand her the preview link in the chat.** After you open the change, retrieve the preview URL (the deployment preview created for it) and paste it to her as *"here's a preview."* Do not send her to GitHub to hunt for it.
+- **Publish on her plain-language approval.** When she says "looks good / publish it / go ahead," merge it; production updates automatically. Confirm in plain words: *"Done — it's live."*
+- **Undo is plain too.** If she says "that's wrong / undo it," revert the change for her and confirm.
+
+Her three-step model is: **ask → look at a preview → say "publish it."** Everything else is invisible.
+
 ## CRITICAL: Security
 
 **NEVER commit secrets to git.** Real secrets live only in `.env` (git-ignored) locally and in the Vercel project env in production.

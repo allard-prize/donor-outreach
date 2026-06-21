@@ -56,14 +56,14 @@ The repo is owned by `allard-prize-alerts` on GitHub and may be public at any ti
 - Threshold tuning (e.g. the priority-score alert cutoff)
 - Adding or relabelling a `profileType` or `touchpointType` value
 - Prompt refinements — `prompts/agent-*.md` (but run the prompt-change gate below)
-- Adding a simple display field that already exists in the data
+- Adding a new field/column (e.g. a prospect LinkedIn URL) — non-destructive schema changes now apply automatically via the preview→merge flow
 
 **Ask a developer — do NOT change these without escalating in the PR:**
 - Auth and the `ADMIN_ALLOWED_EMAILS` allowlist — `auth.ts`, `proxy.ts`
 - Secrets, env vars, OAuth tokens, and the OpenRouter cost cap
 - Microsoft Graph / SharePoint dossier auth — `lib/msgraph/`, the `app_token` store
 - The cron schedule — `vercel.json` `crons`
-- **Database schema migrations** — see the Database & migrations section. Destructive ops always require escalation; and until migrate-on-deploy is wired, *any* schema change needs a developer to apply it to production.
+- **Destructive schema migrations** — column/table drops or type narrowings always require escalation and a `-- DESTRUCTIVE` annotation. (Non-destructive schema changes like adding a column are now self-service via migrate-on-deploy — see the Database & migrations section.)
 
 ## Tech stack
 
@@ -101,8 +101,10 @@ pnpm lint:migrations && pnpm lint && pnpm test && pnpm build
 - Drizzle ORM + Neon Postgres. Schema is defined in `lib/db/schema.ts`; generated SQL migrations live in `drizzle/migrations/`.
 - To change the schema: edit `lib/db/schema.ts`, then run `pnpm db:generate` to produce the migration SQL. **Never hand-edit generated migration SQL.**
 - **Destructive ops** (`DROP TABLE`, `DROP COLUMN`, `ALTER COLUMN ... TYPE`, any type narrowing) **must have `-- DESTRUCTIVE` as the first line** of the migration `.sql` file. CI (`pnpm lint:migrations`) fails the build if an unannotated destructive op is present. Add the annotation by hand after `pnpm db:generate`, and call it out in the PR.
-- **How migrations reach production (current state):** migrations are applied **manually** by a developer running `pnpm db:migrate` against the production database — they do **not** apply automatically on deploy yet. So if a request needs a schema change (e.g. "add a LinkedIn URL column"): generate the migration in your PR, **and state clearly in the PR description that a developer must run `pnpm db:migrate` after merge.** Treat schema changes as developer-assisted until the upgrade below lands.
-- **Planned upgrade (Phase 3A T2):** migrate-on-deploy, with PR previews applying migrations to a throwaway Neon preview branch (so a schema change can be reviewed on the preview before it touches prod) and merges applying to prod automatically. When that is wired, this section is updated and schema changes become self-service.
+- **How migrations reach production — migrate-on-deploy (live):** migrations apply **automatically on deploy**. `vercel.json`'s `buildCommand` runs `pnpm db:migrate:deploy` (= `drizzle-kit migrate`) before the build, against the deploy's own database:
+  - A PR's **preview** deploy applies the migration to its **own throwaway Neon preview branch** (auto-created by the Neon native integration, isolated from prod) — so the change can be reviewed on the preview before it goes live.
+  - Merging to `main` applies it to **production** on the prod deploy.
+  - So a schema change is **self-service**: edit `lib/db/schema.ts` → `pnpm db:generate` → open the PR → review the preview → merge. No manual `pnpm db:migrate` step against prod. (`pnpm db:migrate` with `.env.local` is still the way to apply migrations to prod by hand if ever needed.)
 
 ## Project layout
 

@@ -49,7 +49,10 @@ export async function runJob(job: RunnableJob): Promise<JobResult> {
       }
       case "donor_outreach": {
         const s = await runDonorOutreach({ cronRunId: run.id });
-        outcome = s.prospectsFailed > 0 || s.briefingsFailed > 0 ? "partial" : "success";
+        outcome =
+          s.prospectsFailed > 0 || s.briefingsFailed > 0 || s.prospectsDeferred > 0
+            ? "partial"
+            : "success";
         itemsProcessed = s.resultsProcessed;
         summary = { ...s };
         break;

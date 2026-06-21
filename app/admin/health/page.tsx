@@ -3,13 +3,13 @@ import { db } from "@/lib/db";
 import { briefings, cronRuns, cronJobName, evalRuns } from "@/lib/db/schema";
 import { RunNowButton } from "./run-now-button";
 
-// Mirrors vercel.json. null = no schedule (health_check has no cron route).
+// Mirrors vercel.json. null = no schedule.
 const CRON_SCHEDULES: Record<string, { expr: string; label: string } | null> = {
   rss: { expr: "0 6 * * *", label: "daily 06:00" },
   email_capture: { expr: "30 6 * * *", label: "daily 06:30" },
   linkedin_scrape: { expr: "0 0 * * 1", label: "Sun night (Mon 00:00 UTC)" },
   donor_outreach: { expr: "0 2 * * 1", label: "Sun night (Mon 02:00 UTC)" },
-  health_check: null,
+  health_check: { expr: "0 12 * * 1", label: "Mon 12:00 UTC" },
 };
 
 // Next fire of a simple cron (`M H * * D` or `M H * * *`) at/after `now`, in UTC.
@@ -94,7 +94,8 @@ export default async function HealthPage() {
       lastSuccess: runs.find((r) => r.status === "success"),
       schedule: sched,
       nextRun: sched ? nextCronRun(sched.expr, now) : null,
-      runnable: sched != null,
+      // health_check has a schedule but no "Run now" path (not a RunnableJob).
+      runnable: sched != null && job !== "health_check",
     };
   });
 

@@ -11,19 +11,29 @@ import { getStoredGraphToken } from "@/lib/msgraph/token-store";
 import { runAgent, type AgentCallResult } from "@/lib/llm/agent";
 
 // Process prospects with bounded concurrency so the weekly run finishes inside
-// Vercel's 60s maxDuration (Hobby). Sequential ~15-20s/prospect agent calls blow
-// past 60s after ~2-3 prospects; a pool of 8 fits ~24 prospects comfortably.
-const PROSPECT_CONCURRENCY = 8;
+// Vercel's 60s maxDuration (Hobby). Each prospect costs ~30-40s (SharePoint
+// dossier read + OpenRouter agent call), so a narrow pool runs out the clock —
+// a pool of 8 only clears ~14 prospects before the function is hard-killed,
+// stranding a `running` cron row with no digest sent. A wide pool fires the
+// whole roster in one wave (wall-clock ≈ the slowest single call). SCORING_BUDGET_MS
+// is a soft deadline: once it passes, workers stop starting new prospects (those
+// are left pending and picked up on the next run) so the function always returns
+// and records its outcome instead of being killed mid-write. Per-call timeouts
+// (see scoreProspect) keep any single agent call from blowing the budget.
+const PROSPECT_CONCURRENCY = 24;
+const SCORING_BUDGET_MS = 48_000;
 
 async function mapPool<T, R>(
   items: T[],
   limit: number,
+  deadline: number,
   fn: (item: T, index: number) => Promise<R>
-): Promise<R[]> {
-  const results = new Array<R>(items.length);
+): Promise<(R | undefined)[]> {
+  const results = new Array<R | undefined>(items.length).fill(undefined);
   let next = 0;
   async function worker() {
     while (next < items.length) {
+      if (Date.now() >= deadline) return; // budget exhausted — leave the rest pending
       const i = next++;
       results[i] = await fn(items[i], i);
     }
@@ -45,6 +55,9 @@ export type DonorOutreachSummary = {
   prospectsAggregated: number;
   prospectsScored: number;
   prospectsFailed: number;
+  // Prospects the scoring budget ran out before reaching — left pending for the
+  // next run. Non-zero marks the run `partial`.
+  prospectsDeferred: number;
   briefingsSent: number;
   briefingsFailed: number;
   resultsProcessed: number;
@@ -96,6 +109,7 @@ export async function runDonorOutreach(
     prospectsAggregated: aggregated.length,
     prospectsScored: 0,
     prospectsFailed: 0,
+    prospectsDeferred: 0,
     briefingsSent: 0,
     briefingsFailed: 0,
     resultsProcessed: 0,
@@ -133,14 +147,25 @@ export async function runDonorOutreach(
 
   // Score prospects with bounded concurrency, persisting each assessment, then
   // send ONE weekly digest covering them all (replaces per-prospect emails).
-  const outcomes = await mapPool(aggregated, PROSPECT_CONCURRENCY, (prospect) =>
-    scoreProspect({ prospect, runDate, agentFn, dossierFn, graphAccessToken })
+  const deadline = Date.now() + SCORING_BUDGET_MS;
+  const outcomes = await mapPool(
+    aggregated,
+    PROSPECT_CONCURRENCY,
+    deadline,
+    (prospect) =>
+      scoreProspect({ prospect, runDate, agentFn, dossierFn, graphAccessToken, deadline })
   );
 
   const entries: DigestEntry[] = [];
   for (let i = 0; i < aggregated.length; i += 1) {
     const prospect = aggregated[i];
     const outcome = outcomes[i];
+    if (!outcome) {
+      // Scoring budget ran out before this prospect — its results stay pending
+      // and are scored on the next run.
+      summary.prospectsDeferred += 1;
+      continue;
+    }
     summary.llmCostUsd += outcome.llmCostUsd;
     summary.llmCallCount += outcome.llmCallCount;
     if (outcome.kind === "scored") {
@@ -218,6 +243,7 @@ async function scoreProspect(args: {
   agentFn: NonNullable<DonorOutreachOptions["agentFn"]>;
   dossierFn: NonNullable<DonorOutreachOptions["dossierFn"]>;
   graphAccessToken?: string;
+  deadline: number;
 }): Promise<ProspectOutcome> {
   let context = "";
   try {
@@ -243,7 +269,13 @@ async function scoreProspect(args: {
     touchpoints: args.prospect.touchpoints,
   };
 
-  const call = await args.agentFn(agentInputs);
+  // Bound the call to the remaining scoring budget so one slow prospect can't
+  // push the function past the 60s cap. A timed-out call returns ok:false →
+  // failed outcome → results stay pending for the next run.
+  const remainingMs = args.deadline - Date.now();
+  const call = await args.agentFn(agentInputs, {
+    timeoutMs: Math.max(5_000, remainingMs),
+  });
   const llmCostUsd = call.costUsd;
   const llmCallCount = 1;
 

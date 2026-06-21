@@ -176,6 +176,7 @@ export const prospects = pgTable(
     linkedInEnabled: boolean("linkedin_enabled").notNull().default(false),
     dossierProvider: dossierProvider("dossier_provider"),
     dossierFileId: text("dossier_file_id"),
+    t2ProofMarker: text("t2_proof_marker"),
     createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { mode: "date" }).notNull().defaultNow(),
     archivedAt: timestamp("archived_at", { mode: "date" }),

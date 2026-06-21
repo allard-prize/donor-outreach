@@ -1,0 +1,1 @@
+ALTER TABLE "prospect" ADD COLUMN "t2_proof_marker" text;

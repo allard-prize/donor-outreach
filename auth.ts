@@ -17,7 +17,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
     verificationTokensTable: verificationTokens,
   }),
   session: { strategy: "database" },
-  providers: [Google],
+  providers: [Google({ authorization: { params: { prompt: "select_account" } } })],
   callbacks: {
     signIn({ user }) {
       const email = user.email?.toLowerCase();

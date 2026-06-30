@@ -24,7 +24,7 @@ export default async function AdminLayout({
         <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-3">
           <nav className="flex items-center gap-5">
             <span className="text-sm font-semibold tracking-tight">
-              AP Donor Outreach
+              AP donor outreach 2
             </span>
             {NAV.map((n) => (
               <Link

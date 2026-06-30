@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "AP Donor Outreach",
+  title: "AP donor outreach 2",
   description: "Allard Prize donor-intelligence monitoring and weekly briefings",
 };
 

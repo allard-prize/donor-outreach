@@ -54,27 +54,27 @@ function buildDoc(): Document {
         children: [
           h1("Making Changes — Maintenance Guide"),
           p(
-            "You can change this system yourself by having a conversation with ChatGPT — no code, no developer. You describe what you want, look at a preview, and approve it. ChatGPT does all the technical work behind the scenes. Here is the whole process."
+            "You can change this system yourself by having a conversation with ChatGPT — no code, no developer. You describe what you want, ChatGPT prepares the change, and you preview and publish it with a couple of clicks. Here is the whole process."
           ),
 
           h2("The three steps"),
           step(
             1,
             "Ask for the change",
-            "Open ChatGPT and describe what you want in plain English — for example, “Add the priority score to the weekly digest email.” ChatGPT makes the change and sends you back a link to preview it. (On the dashboard, the “Make a change” page has a button that opens ChatGPT for you.)"
+            "Open ChatGPT and describe what you want in plain English — for example, “Add the priority score to the weekly digest email.” ChatGPT makes the change for you. (On the dashboard, the “Make a change” page has a button that opens ChatGPT for you.)"
           ),
           step(
             2,
-            "Look at the preview",
-            "Open the link ChatGPT gives you. It’s a private copy of the system with your change applied, so you can see exactly what it will look like. Nothing is live yet — the real system is untouched until you say so."
+            "Open it on GitHub",
+            "When ChatGPT finishes, it shows a green button to open your change on GitHub. Click it. GitHub is simply where you preview and approve changes — you only need two buttons there, and this guide points them out. You don’t need to understand anything else on the page."
           ),
           step(
             3,
-            "Publish it",
-            "Happy with the preview? Reply “publish it” and ChatGPT makes the change live. Not quite right? Tell ChatGPT what to fix and it will send you a new preview. Changed your mind after it’s live? Just say “undo that.”"
+            "Preview, then publish",
+            "On the GitHub page, click the preview link to see your change on a private copy of the system — nothing is live yet. If it looks right, click the green “Merge” button to publish it and make it live. (If the page says your change is a “draft,” click “Ready for review” first, then the green Merge button.) If it’s not right, go back to ChatGPT and tell it what to fix — it will prepare a new version for you to preview."
           ),
           p(
-            "That’s it. You never touch code, and you don’t need to understand anything technical — ChatGPT handles all of that for you."
+            "That’s it. You never write any code. The only technical-looking step is clicking the green button on GitHub to publish — everything else is just describing what you want to ChatGPT."
           ),
 
           h2("Things you can ask for"),
@@ -93,7 +93,7 @@ function buildDoc(): Document {
 
           h2("If something looks wrong"),
           p(
-            "Nothing you do here can quietly break things: every change is previewed before it goes live, and anything live can be undone by asking ChatGPT to “undo that.” You also get a short health email each week confirming the system is running. If a change doesn’t go the way you expected, or ChatGPT seems stuck, email Brian — he can always step in."
+            "Nothing you do here can quietly break things: every change is previewed before it goes live, and you are the one who clicks the green Merge button to publish — so nothing reaches the real system until you approve it. Want to undo something that’s already live? Ask ChatGPT to undo it, then publish that change the same way (open it on GitHub and click Merge). You also get a short health email each week confirming the system is running. If a change doesn’t go the way you expected, or ChatGPT seems stuck, email Brian — he can always step in."
           ),
 
           h2("A tip"),

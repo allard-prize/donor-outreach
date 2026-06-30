@@ -61,7 +61,7 @@ export default async function AdminHomePage() {
 
   return (
     <main>
-      <h1 className="text-xl font-semibold">Donor Outreach — Dashboard</h1>
+      <h1 className="text-xl font-semibold">AP Donor Outreach</h1>
 
       <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {cards.map((c) => (

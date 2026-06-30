@@ -19,13 +19,13 @@ const STEPS = [
   },
   {
     n: 2,
-    title: "Look at the preview",
-    body: "Open the link it gives you — it's a private copy of the site with your change applied. Check that it looks right. Nothing is live yet.",
+    title: "Open it & preview",
+    body: "Open the link ChatGPT gives you — it opens your change on GitHub. Click the preview link there to see a private copy of the site with your change applied. Nothing is live yet.",
   },
   {
     n: 3,
     title: "Publish (or adjust)",
-    body: "Happy with it? Reply “publish it” and ChatGPT makes it live for you. Not quite right? Tell it what to change. Changed your mind later? Just say “undo that.”",
+    body: "Looks right? Click the green “Merge” button to make it live. Not quite right? Tell ChatGPT what to change. Changed your mind later? Ask it to “undo that,” and publish that the same way.",
   },
 ];
 
@@ -68,8 +68,8 @@ export default function MaintenancePage() {
       <h1 className="text-xl font-semibold">Make a change</h1>
       <p className="mt-2 max-w-2xl text-sm text-zinc-600">
         You can evolve this system by talking to your AI assistant — no code, no
-        developer. Describe what you want, review a preview, and approve it. Here
-        is the whole loop:
+        developer. Describe what you want, preview it, and publish it with a
+        couple of clicks. Here is the whole loop:
       </p>
 
       <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-3">

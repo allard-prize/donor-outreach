@@ -23,24 +23,25 @@ Keep changes small and reviewable. When unsure whether a request is in scope, pr
 1. Work on a branch — never commit to `main`.
 2. Make the smallest change that satisfies the request.
 3. Verify locally (see **Verify before every PR** below).
-4. Open a Pull Request with a plain-English title and a description of *what changed and why*.
-5. Vercel auto-deploys a **preview** for the PR and posts the preview URL as a PR comment. The operator reviews the change there.
-6. On approval the PR is merged to `main`; production redeploys automatically.
-7. If the preview looks wrong, the operator comments on the PR — revise on the same branch and push again.
+4. Open a Pull Request — **ready for review, never a draft** — with a plain-English title and a description of *what changed and why*. (A draft hides the green Merge button and strands the operator.)
+5. Vercel auto-deploys a **preview** for the PR and posts the preview URL as a PR comment.
+6. **You cannot merge from your environment** (the cloud sandbox has no publish/merge connection). So hand the operator the PR link and the preview link; she reviews the preview and clicks the green **Merge** button herself to publish. Production redeploys automatically on merge.
+7. If the preview looks wrong, she tells you in chat what to fix — revise on the same branch and push again; the same PR and preview update.
 
 Branch protection blocks direct pushes to `main`, so a PR is the only path. That is the safety model: **every change passes through a preview before it reaches production.**
 
 ## Talking to the operator — plain language only (IMPORTANT)
 
-The operator (Preet) is **non-technical**. She must NOT need to understand branches, pull requests, merges, deploys, environments, previews, or migrations. The machinery above is real and matters — but it is **your** concern, never hers. Hide all of it:
+The operator (Preet) is **non-technical**. Keep all the machinery (branches, commits, deploys, migrations) your concern — but there is **one** action only she can take: **you cannot publish from your environment.** The cloud sandbox has no publish/merge connection, so you can build and open a change but the final "make it live" click happens on GitHub. Your job is to do everything up to that click, then hand her the cleanest possible path.
 
-- **Never use git/dev jargon with her.** Don't say "branch," "pull request / PR," "merge," "commit," "deploy," "production vs. preview," "environment," or "migration." Instead say: *"I've made the change,"* *"here's a link to preview it,"* *"want me to publish it?,"* *"it's now live,"* *"I've undone that."*
-- **Do every mechanical step yourself.** You create the change, prepare the preview, and — once she approves — **publish it (merge to `main`) on her behalf.** She never opens GitHub and never clicks a merge button. Her only actions are: describe what she wants, glance at a preview link, and say "publish it" or "change X."
-- **Hand her the preview link in the chat.** After you open the change, retrieve the preview URL (the deployment preview created for it) and paste it to her as *"here's a preview."* Do not send her to GitHub to hunt for it.
-- **Publish on her plain-language approval.** When she says "looks good / publish it / go ahead," merge it; production updates automatically. Confirm in plain words: *"Done — it's live."*
-- **Undo is plain too.** If she says "that's wrong / undo it," revert the change for her and confirm.
+- **Never use git/dev jargon with her.** Don't say "branch," "pull request / PR," "commit," "deploy," "production vs. preview," or "migration." Say: *"I've made the change,"* *"here's a link to preview it,"* *"open this and click the green button to publish it,"* *"it's now live,"* *"I've undone that."*
+- **Open the change ready-to-publish, never a draft.** A draft hides the green Merge button and leaves her stuck. Always open the pull request ready for review.
+- **Hand her two links in the chat:** the **preview link** (*"here's a preview of your change — nothing is live yet"*) and the **GitHub link** (*"when it looks good, open this and click the green ‘Merge’ button to make it live"*). Be explicit that clicking the green button is what publishes it.
+- **You do NOT publish — she does.** You physically can't merge from here, so never say "I'll publish it for you" or claim "it's live" on your own say-so. After she clicks Merge, production redeploys automatically and she can confirm on the live site.
+- **Revisions stay in chat.** If she says "change X," revise and send her fresh preview + publish links — don't tell her to comment on GitHub.
+- **Undo is the same shape.** If she says "that's wrong / undo it," prepare the undo and give her the publish link to make it live.
 
-Her three-step model is: **ask → look at a preview → say "publish it."** Everything else is invisible.
+Her model is: **ask → look at a preview → open the link and click the green button to publish.**
 
 ## CRITICAL: Security
 

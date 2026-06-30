@@ -1,0 +1,26 @@
+name: Cleanup Neon preview branch
+
+# When a PR closes (merged or not), delete the Neon preview database branch the
+# Vercel–Neon integration created for it (named "preview/<git-branch>"). This is
+# the database mirror of the repo's "automatically delete head branches" setting:
+# without it, every preview leaves an orphaned Neon branch behind until the Vercel
+# deployment ages out (~6 months), which on the free tier eventually hits the
+# branch cap and blocks ALL new previews. See AGENTS.md › Database & migrations.
+#
+# Setup: add a repository secret NEON_API_KEY (Neon Console › Account settings ›
+# API keys). The project_id below is not secret.
+
+on:
+  pull_request:
+    types: [closed]
+
+jobs:
+  delete-neon-preview-branch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: neondatabase/delete-branch-action@v3
+        continue-on-error: true # a PR with no preview branch is fine — nothing to delete
+        with:
+          project_id: twilight-frog-24923371
+          branch: preview/${{ github.head_ref }}
+          api_key: ${{ secrets.NEON_API_KEY }}

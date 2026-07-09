@@ -28,7 +28,7 @@ export type AggregatedProspect = {
   prospectId: string;
   fullName: string;
   profileType: string;
-  dossierProvider: "google_docs" | "onedrive" | null;
+  dossierProvider: (typeof prospects.$inferSelect)["dossierProvider"];
   dossierFileId: string | null;
   results: AgentResultItem[];
   touchpoints: AgentTouchpoint[];

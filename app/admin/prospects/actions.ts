@@ -30,8 +30,8 @@ function parseProspectForm(formData: FormData) {
     emailEnabled: formData.get("emailEnabled") === "on",
     linkedInEnabled: formData.get("linkedInEnabled") === "on",
     dossierFileId,
-    // Provider stays google_docs until Phase 2G cutover; only set when a file id exists.
-    dossierProvider: dossierFileId ? ("google_docs" as const) : null,
+    // Post-Phase-2G: dossier file ids are SharePoint item ids; only set when one exists.
+    dossierProvider: dossierFileId ? ("onedrive" as const) : null,
   };
 }
 

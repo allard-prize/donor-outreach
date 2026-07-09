@@ -138,7 +138,7 @@ lib/
     eval-cases.ts     # curated synthetic eval cases + reusable checks (2E)
     __tests__/        # Vitest unit suite for contract + judge (CI gate)
   email/     render-briefing.ts (Phase 1 HTML layout) · send-briefing.ts (Gmail send + briefings row)
-  dossiers/  index.ts (provider dispatch) · google-docs.ts · onedrive.ts (SharePoint via MS Graph + mammoth)
+  dossiers/  index.ts (provider dispatch, onedrive-only since 2G) · onedrive.ts (SharePoint via MS Graph + mammoth)
   msgraph/   client.ts (Graph auth + shares/upload helpers, 2G)
   cron-runs/ recorder.ts (recordRunStart / recordRunFinish)
 drizzle/migrations/    # drizzle-kit-generated SQL migrations

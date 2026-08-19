@@ -4,6 +4,13 @@ import { briefings, cronRuns } from "@/lib/db/schema";
 
 const SPEND_CAP_USD = 25;
 
+// Warn while there is still time to act. The agent reserves up to
+// MAX_COMPLETION_TOKENS of balance per in-flight call, and a weekly run fires
+// the whole roster concurrently, so the account needs several dollars of
+// headroom to even start. A weekly run costs ~$0.45, so $5 is ~10 weeks of
+// runway — enough notice to top up before anything breaks.
+const LOW_CREDIT_WARN_USD = 5;
+
 // Max acceptable time since the last *successful* run, per scheduled job. A job
 // with no success inside this window is flagged "overdue" (its cron is likely
 // broken). Daily jobs allow ~2 days of slack; weekly jobs ~8. health_check
@@ -33,6 +40,14 @@ export type FailureRow = {
 export type HealthReport = {
   ok: boolean;
   now: Date;
+  /**
+   * Remaining OpenRouter prepaid balance, or null if the balance could not be
+   * read (missing key, API down). Distinct from mtdSpendUsd, which only counts
+   * what this system spent this month — an exhausted balance shows up as
+   * *falling* spend, which is invisible against a cap.
+   */
+  creditBalanceUsd: number | null;
+  lowCredit: boolean;
   mtdSpendUsd: number;
   mtdCalls: number;
   spendCapUsd: number;
@@ -43,7 +58,7 @@ export type HealthReport = {
 };
 
 export async function buildHealthReport(): Promise<HealthReport> {
-  const [recentRuns, mtdRows, failureRows, nowRes] = await Promise.all([
+  const [recentRuns, mtdRows, failureRows, nowRes, creditBalanceUsd] = await Promise.all([
     db.select().from(cronRuns).orderBy(desc(cronRuns.startedAt)).limit(200),
     db
       .select({
@@ -63,12 +78,14 @@ export async function buildHealthReport(): Promise<HealthReport> {
       )
       .orderBy(desc(cronRuns.startedAt)),
     db.execute(sql`select now() as now`),
+    fetchOpenRouterBalance(),
   ]);
 
   const now = new Date(String(nowRes.rows[0]?.now ?? ""));
   const mtdSpendUsd = Number(mtdRows[0]?.cost ?? 0);
   const mtdCalls = Number(mtdRows[0]?.calls ?? 0);
   const overCap = mtdSpendUsd > SPEND_CAP_USD;
+  const lowCredit = creditBalanceUsd !== null && creditBalanceUsd < LOW_CREDIT_WARN_USD;
 
   const concerns: string[] = [];
 
@@ -100,11 +117,18 @@ export async function buildHealthReport(): Promise<HealthReport> {
     job: r.jobName,
     status: r.status,
     startedAt: r.startedAt,
-    errorMessage: r.errorMessage,
+    errorMessage: r.errorMessage ?? reasonFromMetadata(r.metadata),
   }));
   for (const f of failures) {
     concerns.push(
       `${f.job} ${f.status} at ${fmtUtc(f.startedAt)}${f.errorMessage ? `: ${f.errorMessage}` : ""}`
+    );
+  }
+
+  if (lowCredit) {
+    concerns.push(
+      `OpenRouter balance is $${(creditBalanceUsd as number).toFixed(2)} — top up at ` +
+        `https://openrouter.ai/settings/credits or the weekly agent run will fail with a 402`
     );
   }
 
@@ -117,6 +141,8 @@ export async function buildHealthReport(): Promise<HealthReport> {
   return {
     ok: concerns.length === 0,
     now,
+    creditBalanceUsd,
+    lowCredit,
     mtdSpendUsd,
     mtdCalls,
     spendCapUsd: SPEND_CAP_USD,
@@ -170,6 +196,11 @@ export function renderHealthEmail(r: HealthReport): { subject: string; html: str
     </table>
     <h3 style="margin-bottom:6px;">LLM spend</h3>
     <p style="font-size:13px;margin-top:0;">$${r.mtdSpendUsd.toFixed(2)} month-to-date of $${r.spendCapUsd} cap · ${r.mtdCalls} agent call(s).${r.overCap ? " <strong style=\"color:#b91c1c;\">Over cap.</strong>" : ""}</p>
+    <p style="font-size:13px;margin-top:0;">OpenRouter balance: ${
+      r.creditBalanceUsd === null
+        ? "<span style=\"color:#71717a;\">could not be read</span>"
+        : `$${r.creditBalanceUsd.toFixed(2)}${r.lowCredit ? " <strong style=\"color:#b91c1c;\">Low — top up.</strong>" : ""}`
+    }</p>
     <p style="color:#a1a1aa;font-size:12px;margin-top:24px;">Automated weekly health check · Donor Outreach System.</p>
   </body></html>`;
 
@@ -185,4 +216,69 @@ function escapeHtml(s: string): string {
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;");
+}
+
+/**
+ * A `partial` run leaves `error_message` null — the per-item causes live in the
+ * run's metadata instead, so the health email said only "donor_outreach partial
+ * at <time>" with no reason. That silence is why the Aug 2026 OpenRouter 402
+ * outage ran four weeks: the alert fired correctly every week but never said
+ * what was wrong. Dig the first per-item failure out of metadata so the email
+ * carries an actionable cause.
+ */
+function reasonFromMetadata(metadata: unknown): string | null {
+  if (!metadata || typeof metadata !== "object") return null;
+  const m = metadata as Record<string, unknown>;
+
+  // donor_outreach: { failures: [{ prospectId, fullName, stage, error }] }
+  const failures = m.failures;
+  if (Array.isArray(failures) && failures.length > 0) {
+    const f = failures[0] as Record<string, unknown>;
+    const stage = typeof f.stage === "string" ? `${f.stage}: ` : "";
+    const error = typeof f.error === "string" ? f.error : JSON.stringify(f);
+    return `${failures.length} item(s) failed — ${stage}${error.slice(0, 240)}`;
+  }
+
+  // rss / email_capture / linkedin_scrape: { prospectsFailed: [...] } or
+  // { feedsFailed: n }. Report whatever shape carries the count.
+  const prospectsFailed = m.prospectsFailed;
+  if (Array.isArray(prospectsFailed) && prospectsFailed.length > 0) {
+    return `${prospectsFailed.length} prospect(s) failed: ${JSON.stringify(prospectsFailed).slice(0, 240)}`;
+  }
+  if (typeof m.feedsFailed === "number" && m.feedsFailed > 0) {
+    return `${m.feedsFailed} feed(s) failed`;
+  }
+  if (typeof m.prospectsTimedOut === "number" && m.prospectsTimedOut > 0) {
+    return `${m.prospectsTimedOut} prospect(s) timed out`;
+  }
+  if (typeof m.prospectsDeferred === "number" && m.prospectsDeferred > 0) {
+    return `${m.prospectsDeferred} prospect(s) deferred past the scoring budget`;
+  }
+  return null;
+}
+
+/**
+ * Best-effort read of the OpenRouter prepaid balance. Never throws — a health
+ * check that dies because a third party is unreachable is worse than one that
+ * reports an unknown balance.
+ */
+async function fetchOpenRouterBalance(): Promise<number | null> {
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey) return null;
+  try {
+    const res = await fetch("https://openrouter.ai/api/v1/credits", {
+      headers: { Authorization: `Bearer ${apiKey}` },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!res.ok) return null;
+    const body = (await res.json()) as {
+      data?: { total_credits?: number; total_usage?: number };
+    };
+    const granted = body.data?.total_credits;
+    const used = body.data?.total_usage;
+    if (typeof granted !== "number" || typeof used !== "number") return null;
+    return granted - used;
+  } catch {
+    return null;
+  }
 }

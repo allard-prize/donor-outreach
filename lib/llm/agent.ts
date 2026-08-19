@@ -9,6 +9,15 @@ import {
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 const DEFAULT_MODEL = process.env.OPENROUTER_AGENT_MODEL ?? "anthropic/claude-sonnet-4.6";
 const DEFAULT_TIMEOUT_MS = 90_000;
+// Cap the completion explicitly. Without max_tokens OpenRouter reserves the
+// model's full default output window (65,536 tokens on Sonnet 4.6) against the
+// account balance *before* the call runs, so every request needs ~$0.98 of
+// headroom — times PROSPECT_CONCURRENCY in flight — even though a real
+// assessment costs ~$0.03. That reservation is what turned a low balance into
+// four straight weeks of 402s in Aug 2026. The agent returns one compact JSON
+// object; the largest ever persisted was ~6.4k characters (~1.7k tokens), so
+// 8k is >4x the observed ceiling and cuts the reservation to ~$0.12.
+const MAX_COMPLETION_TOKENS = 8_000;
 
 export type AgentCallResult =
   | {
@@ -85,6 +94,7 @@ export async function runAgent(
           { role: "user", content: userPrompt },
         ],
         temperature: 0.2,
+        max_tokens: MAX_COMPLETION_TOKENS,
         usage: { include: true },
       }),
     });

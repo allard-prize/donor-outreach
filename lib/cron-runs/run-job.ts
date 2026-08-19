@@ -49,6 +49,19 @@ export async function runJob(job: RunnableJob): Promise<JobResult> {
       }
       case "donor_outreach": {
         const s = await runDonorOutreach({ cronRunId: run.id });
+        // A run where *every* prospect failed is a failure, not a partial —
+        // nothing was scored and no digest went out. Classifying it `partial`
+        // made a total outage read like a mostly-fine week in the health
+        // check, which is how the Aug 2026 OpenRouter 402 outage ran for four
+        // weeks before anyone looked.
+        if (s.prospectsAggregated > 0 && s.prospectsFailed === s.prospectsAggregated) {
+          await recordRunFinish(run.id, "failure", {
+            itemsProcessed: s.resultsProcessed,
+            metadata: { ...s },
+            errorMessage: firstFailureMessage(s.failures),
+          });
+          return { ok: false, cronRunId: run.id, error: firstFailureMessage(s.failures) ?? "all prospects failed" };
+        }
         outcome =
           s.prospectsFailed > 0 || s.briefingsFailed > 0 || s.prospectsDeferred > 0
             ? "partial"
@@ -70,4 +83,18 @@ export async function runJob(job: RunnableJob): Promise<JobResult> {
     await recordRunFinish(run.id, "failure", { errorMessage: message });
     return { ok: false, cronRunId: run.id, error: message };
   }
+}
+
+/**
+ * The most useful one-line reason from a batch of per-prospect failures. Every
+ * prospect usually fails for the same upstream cause (expired token, no
+ * OpenRouter credit), so the first one is representative — and putting it in
+ * `error_message` is what gets it into the weekly health-check email.
+ */
+function firstFailureMessage(
+  failures: { stage: string; error: string }[]
+): string | undefined {
+  const f = failures[0];
+  if (!f) return undefined;
+  return `all ${failures.length} prospect(s) failed at ${f.stage}: ${f.error.slice(0, 300)}`;
 }
